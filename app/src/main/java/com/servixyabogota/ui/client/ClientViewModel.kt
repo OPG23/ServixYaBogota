@@ -228,4 +228,53 @@ class ClientViewModel : ViewModel() {
         return repository.obtenerMisSolicitudesCliente(clienteId)
             .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     }
+
+    fun actualizarSolicitud(
+        solicitudId: String,
+        clienteId: String,
+        categoria: String,
+        detalle: String,
+        urgencia: String,
+        direccion: String,
+        localidad: String,
+        archivos: List<Uri>,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val result = repository.actualizarSolicitudConArchivos(
+                    solicitudId = solicitudId,
+                    clienteId = clienteId,
+                    datos = mapOf(
+                        "categoria" to categoria,
+                        "detalleProblema" to detalle,
+                        "nivelUrgencia" to urgencia,
+                        "direccion" to direccion,
+                        "localidad" to localidad
+                    ),
+                    archivosUris = archivos
+                )
+
+                if (result.isSuccess) {
+                    onSuccess()
+                } else {
+                    onError(result.exceptionOrNull()?.localizedMessage ?: "Error al actualizar")
+                }
+            } catch (e: Exception) {
+                onError(e.localizedMessage ?: "Error inesperado")
+            }
+        }
+    }
+
+    fun cancelarSolicitud(
+        solicitudId: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val result = repository.cancelarSolicitud(solicitudId)
+            if (result.isSuccess) onSuccess() else onError(result.exceptionOrNull()?.message ?: "Error al cancelar")
+        }
+    }
 }

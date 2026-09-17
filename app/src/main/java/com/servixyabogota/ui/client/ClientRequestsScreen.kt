@@ -1,48 +1,29 @@
 package com.servixyabogota.ui.client
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.outlined.*
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.draw.clip
-
-// ==========================================
-// MODELO DE DATOS Y ENUMS
-// ==========================================
-
-enum class EstadoSolicitud {
-    ABIERTA,
-    EN_PROCESO,
-    COMPLETADA
-}
-
-data class SolicitudClienteModel(
-    val id: String,
-    val titulo: String,
-    val categoria: String,
-    val direccion: String,
-    val tiempoCreada: String,
-    val estado: EstadoSolicitud,
-    val iconoCategoria: ImageVector
-)
+import com.google.firebase.auth.FirebaseAuth
+import com.servixyabogota.data.model.Solicitud
+import java.util.Date
+import java.util.concurrent.TimeUnit
 
 // ==========================================
 // SCREEN PRINCIPAL: MIS SOLICITUDES
@@ -50,55 +31,69 @@ data class SolicitudClienteModel(
 
 @Composable
 fun ClientRequestsScreen(
+    viewModel: ClientViewModel,
     onNuevaSolicitudClick: () -> Unit = {},
-    onEditarClick: (SolicitudClienteModel) -> Unit = {},
-    onCancelarClick: (SolicitudClienteModel) -> Unit = {},
-    onVerChatClick: (SolicitudClienteModel) -> Unit = {},
+    onEditarClick: (Solicitud) -> Unit = {},
+    onCancelarClick: (Solicitud) -> Unit = {},
+    onVerChatClick: (Solicitud) -> Unit = {},
     onNavigateTab: (String) -> Unit = {}
 ) {
     var filtroSeleccionado by remember { mutableStateOf("Abiertas") }
+    var solicitudAEditar by remember { mutableStateOf<Solicitud?>(null) }
+    var solicitudACancelar by remember { mutableStateOf<Solicitud?>(null) }
 
-    val listaSolicitudes = remember {
-        listOf(
-            SolicitudClienteModel(
-                id = "1",
-                titulo = "Fuga en lavamanos principal",
-                categoria = "Plomería",
-                direccion = "Calle 127 #15-45",
-                tiempoCreada = "Creada hace 2 horas",
-                estado = EstadoSolicitud.ABIERTA,
-                iconoCategoria = Icons.Outlined.WaterDrop
-            ),
-            SolicitudClienteModel(
-                id = "2",
-                titulo = "Cambio de tomacorrientes",
-                categoria = "Electricidad",
-                direccion = "Carrera 9 #72-10",
-                tiempoCreada = "Creada hace 5 horas",
-                estado = EstadoSolicitud.ABIERTA,
-                iconoCategoria = Icons.Outlined.ElectricBolt
-            ),
-            SolicitudClienteModel(
-                id = "3",
-                titulo = "Cambio de cerradura puerta principal",
-                categoria = "Cerrajería",
-                direccion = "Av. Boyacá #64-20",
-                tiempoCreada = "Creada hace 1 día",
-                estado = EstadoSolicitud.EN_PROCESO,
-                iconoCategoria = Icons.Outlined.Build
-            )
+    // 1. SI SE HACE CLIC EN EDITAR, MUESTRA CREATEREQUESTSCREEN A PANTALLA COMPLETA
+    val solicitudParaEditar = solicitudAEditar
+    if (solicitudParaEditar != null) {
+        CreateRequestScreen(
+            solicitudToEdit = solicitudParaEditar,
+            onBack = { solicitudAEditar = null },
+            onGuardarEdicion = { id, cat, det, loc, dir, urg, archivos ->
+                viewModel.actualizarSolicitud(
+                    solicitudId = id,
+                    clienteId = solicitudParaEditar.clienteId, // Pasa el clienteId correcto
+                    categoria = cat,
+                    detalle = det,
+                    urgencia = urg,
+                    direccion = dir,
+                    localidad = loc,
+                    archivos = archivos,
+                    onSuccess = { solicitudAEditar = null },
+                    onError = { /* Manejar error si ocurre */ }
+                )
+            }
         )
+        return
     }
 
-    // Filtrado según el tab seleccionado
-    val solicitudesFiltradas = remember(filtroSeleccionado, listaSolicitudes) {
-        when (filtroSeleccionado) {
-            "Abiertas" -> listaSolicitudes.filter { it.estado == EstadoSolicitud.ABIERTA }
-            "En Proceso" -> listaSolicitudes.filter { it.estado == EstadoSolicitud.EN_PROCESO }
-            else -> listaSolicitudes.filter { it.estado == EstadoSolicitud.COMPLETADA }
+    // Obtener UID del usuario autenticado actual
+    val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
+
+    // Obtener el Flow/StateFlow desde el ViewModel
+    val listaSolicitudes by remember(currentUserId) {
+        viewModel.getMisSolicitudes(currentUserId)
+    }.collectAsState(initial = emptyList())
+
+    // Clasificación de listas según el estado
+    val abiertas = remember(listaSolicitudes) {
+        listaSolicitudes.filter { esEstadoPendiente(it.estado) }
+    }
+    val enProceso = remember(listaSolicitudes) {
+        listaSolicitudes.filter { esEstadoEnProceso(it.estado) }
+    }
+    val historial = remember(listaSolicitudes) {
+        listaSolicitudes.filter {
+            !esEstadoPendiente(it.estado) && !esEstadoEnProceso(it.estado)
         }
     }
 
+    val solicitudesFiltradas = when (filtroSeleccionado) {
+        "Abiertas" -> abiertas
+        "En Proceso" -> enProceso
+        else -> historial
+    }
+
+    // 2. INTERFAZ PRINCIPAL CUANDO NO SE ESTÁ EDITANDO
     Scaffold(
         bottomBar = {
             ClientBottomNavigation(
@@ -108,102 +103,149 @@ fun ClientRequestsScreen(
         },
         containerColor = Color(0xFFF8FAFC)
     ) { innerPadding ->
-        LazyColumn(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .statusBarsPadding(),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. ENCABEZADO (Título + Botón Nueva Solicitud)
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Mis Solicitudes",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A)
-                    )
-
-                    Button(
-                        onClick = onNuevaSolicitudClick,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                        shape = RoundedCornerShape(24.dp),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding(),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // ENCABEZADO
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Nueva Solicitud",
-                            fontSize = 13.sp,
+                            text = "Mis Solicitudes",
+                            fontSize = 24.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = Color(0xFF0F172A)
                         )
+
+                        Button(
+                            onClick = onNuevaSolicitudClick,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                            shape = RoundedCornerShape(24.dp),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Nueva Solicitud",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
                     }
                 }
-            }
 
-            // 2. TABS DE FILTRO (Abiertas, En Proceso, Historial)
-            item {
-                Surface(
-                    color = Color(0xFFF1F5F9),
-                    shape = RoundedCornerShape(24.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
-                ) {
-                    Row(
+                // TABS DE FILTRO (Abiertas, En Proceso, Historial)
+                item {
+                    Surface(
+                        color = Color(0xFFF1F5F9),
+                        shape = RoundedCornerShape(24.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .padding(vertical = 4.dp)
                     ) {
-                        val tabs = listOf(
-                            "Abiertas" to "Abiertas (2)",
-                            "En Proceso" to "En Proceso (1)",
-                            "Historial" to "Historial"
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            val tabs = listOf(
+                                "Abiertas" to "Abiertas (${abiertas.size})",
+                                "En Proceso" to "En Proceso (${enProceso.size})",
+                                "Historial" to "Historial (${historial.size})"
+                            )
 
-                        tabs.forEach { (key, label) ->
-                            val isSelected = filtroSeleccionado == key
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(if (isSelected) Color(0xFF2563EB) else Color.Transparent)
-                                    .clickable { filtroSeleccionado = key }
-                                    .padding(vertical = 10.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = label,
-                                    fontSize = 13.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSelected) Color.White else Color(0xFF475569)
-                                )
+                            tabs.forEach { (key, label) ->
+                                val isSelected = filtroSeleccionado == key
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(if (isSelected) Color(0xFF2563EB) else Color.Transparent)
+                                        .clickable { filtroSeleccionado = key }
+                                        .padding(vertical = 10.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = label,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) Color.White else Color(0xFF475569)
+                                    )
+                                }
                             }
                         }
                     }
                 }
+
+                // Mensaje estado vacío
+                if (solicitudesFiltradas.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 40.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "No tienes solicitudes en esta categoría",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+                } else {
+                    // TARJETAS DE SOLICITUDES
+                    items(solicitudesFiltradas, key = { it.id }) { solicitud ->
+                        SolicitudCardItem(
+                            solicitud = solicitud,
+                            onEditarClick = { solicitudAEditar = solicitud },
+                            onCancelarClick = { solicitudACancelar = solicitud },
+                            onVerChatClick = { onVerChatClick(solicitud) }
+                        )
+                    }
+                }
             }
 
-            // 3. TARJETAS DE SOLICITUDES
-            items(solicitudesFiltradas, key = { it.id }) { solicitud ->
-                SolicitudCardItem(
-                    solicitud = solicitud,
-                    onEditarClick = { onEditarClick(solicitud) },
-                    onCancelarClick = { onCancelarClick(solicitud) },
-                    onVerChatClick = { onVerChatClick(solicitud) }
+            // DIÁLOGO DE CANCELACIÓN
+            solicitudACancelar?.let { solicitud ->
+                AlertDialog(
+                    onDismissRequest = { solicitudACancelar = null },
+                    title = { Text("¿Cancelar solicitud?") },
+                    text = { Text("La solicitud pasará al historial como cancelada.") },
+                    confirmButton = {
+                        Button(
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                            onClick = {
+                                viewModel.cancelarSolicitud(
+                                    solicitudId = solicitud.id,
+                                    onSuccess = { solicitudACancelar = null },
+                                    onError = { /* Mostrar error */ }
+                                )
+                            }
+                        ) { Text("Sí, cancelar") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { solicitudACancelar = null }) { Text("Volver") }
+                    }
                 )
             }
         }
@@ -216,7 +258,7 @@ fun ClientRequestsScreen(
 
 @Composable
 private fun SolicitudCardItem(
-    solicitud: SolicitudClienteModel,
+    solicitud: Solicitud,
     onEditarClick: () -> Unit,
     onCancelarClick: () -> Unit,
     onVerChatClick: () -> Unit
@@ -232,13 +274,11 @@ private fun SolicitudCardItem(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Fila superior: Badge Categoría + Badge Estado
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Badge Categoría (con icono)
                 Surface(
                     color = Color(0xFFF1F5F9),
                     shape = RoundedCornerShape(12.dp)
@@ -249,13 +289,13 @@ private fun SolicitudCardItem(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(
-                            imageVector = solicitud.iconoCategoria,
+                            imageVector = obtenerIconoCategoria(solicitud.categoria),
                             contentDescription = null,
                             tint = Color(0xFF334155),
                             modifier = Modifier.size(14.dp)
                         )
                         Text(
-                            text = solicitud.categoria,
+                            text = solicitud.categoria.ifBlank { "General" },
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF0F172A)
@@ -263,11 +303,12 @@ private fun SolicitudCardItem(
                     }
                 }
 
-                // Badge Estado (ABIERTA / EN PROCESO)
-                val (estadoBg, estadoTextColor, estadoTexto) = when (solicitud.estado) {
-                    EstadoSolicitud.ABIERTA -> Triple(Color(0xFFEFF6FF), Color(0xFF2563EB), "ABIERTA")
-                    EstadoSolicitud.EN_PROCESO -> Triple(Color(0xFFDCFCE7), Color(0xFF16A34A), "EN PROCESO")
-                    EstadoSolicitud.COMPLETADA -> Triple(Color(0xFFF1F5F9), Color(0xFF64748B), "COMPLETADA")
+                val estadoTextoLimpio = obtenerEstadoTexto(solicitud.estado)
+                val (estadoBg, estadoTextColor, estadoTexto) = when {
+                    esEstadoPendiente(solicitud.estado) -> Triple(Color(0xFFEFF6FF), Color(0xFF2563EB), "ABIERTA")
+                    esEstadoEnProceso(solicitud.estado) -> Triple(Color(0xFFDCFCE7), Color(0xFF16A34A), "EN PROCESO")
+                    estadoTextoLimpio.contains("CANCEL") -> Triple(Color(0xFFFEE2E2), Color(0xFFEF4444), "CANCELADA")
+                    else -> Triple(Color(0xFFF1F5F9), Color(0xFF64748B), "COMPLETADA")
                 }
 
                 Surface(
@@ -284,15 +325,13 @@ private fun SolicitudCardItem(
                 }
             }
 
-            // Título de la Solicitud
             Text(
-                text = solicitud.titulo,
+                text = solicitud.detalleProblema.ifBlank { "Solicitud de ${solicitud.categoria}" },
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFF0F172A)
             )
 
-            // Ubicación
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -304,15 +343,14 @@ private fun SolicitudCardItem(
                     modifier = Modifier.size(16.dp)
                 )
                 Text(
-                    text = solicitud.direccion,
+                    text = if (solicitud.direccion.isNotBlank()) solicitud.direccion else solicitud.localidad,
                     fontSize = 13.sp,
                     color = Color(0xFF475569)
                 )
             }
 
-            // Tiempo transcurrido
             Text(
-                text = solicitud.tiempoCreada,
+                text = calcularTiempoTranscurrido(solicitud.fechaCreacion),
                 fontSize = 12.sp,
                 color = Color(0xFF94A3B8)
             )
@@ -323,13 +361,11 @@ private fun SolicitudCardItem(
                 modifier = Modifier.padding(vertical = 4.dp)
             )
 
-            // Botones de Acción dinámicos según el estado
-            if (solicitud.estado == EstadoSolicitud.ABIERTA) {
+            if (esEstadoPendiente(solicitud.estado)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Botón Editar
                     OutlinedButton(
                         onClick = onEditarClick,
                         shape = RoundedCornerShape(10.dp),
@@ -345,7 +381,6 @@ private fun SolicitudCardItem(
                         )
                     }
 
-                    // Botón Cancelar
                     OutlinedButton(
                         onClick = onCancelarClick,
                         shape = RoundedCornerShape(10.dp),
@@ -361,8 +396,7 @@ private fun SolicitudCardItem(
                         )
                     }
                 }
-            } else if (solicitud.estado == EstadoSolicitud.EN_PROCESO) {
-                // Botón Ancho Ver Chat / Prestador
+            } else if (esEstadoEnProceso(solicitud.estado)) {
                 Button(
                     onClick = onVerChatClick,
                     shape = RoundedCornerShape(10.dp),
@@ -385,5 +419,55 @@ private fun SolicitudCardItem(
                 }
             }
         }
+    }
+}
+
+// ==========================================
+// FUNCIONES AUXILIARES
+// ==========================================
+
+private fun obtenerEstadoTexto(estado: Any?): String {
+    return when (estado) {
+        is Enum<*> -> estado.name.uppercase()
+        is String -> estado.uppercase()
+        else -> estado?.toString()?.uppercase() ?: ""
+    }
+}
+
+private fun esEstadoPendiente(estado: Any?): Boolean {
+    val texto = obtenerEstadoTexto(estado)
+    return texto.isBlank() || texto == "PENDIENTE" || texto == "ABIERTA"
+}
+
+private fun esEstadoEnProceso(estado: Any?): Boolean {
+    val texto = obtenerEstadoTexto(estado)
+    return texto == "EN_PROCESO" || texto == "ENPROCESO" || texto == "EN PROCESO"
+}
+
+private fun obtenerIconoCategoria(categoria: String): ImageVector {
+    return when (categoria.lowercase()) {
+        "plomería", "plomeria" -> Icons.Outlined.WaterDrop
+        "electricidad" -> Icons.Outlined.ElectricBolt
+        "cerrajería", "cerrajeria" -> Icons.Outlined.Build
+        "pintura" -> Icons.Outlined.FormatPaint
+        "limpieza" -> Icons.Outlined.CleaningServices
+        else -> Icons.Outlined.Handyman
+    }
+}
+
+private fun calcularTiempoTranscurrido(fecha: Date?): String {
+    if (fecha == null) return "Creada recientemente"
+    val diff = System.currentTimeMillis() - fecha.time
+    if (diff <= 0) return "Creada hace un momento"
+
+    val minutos = TimeUnit.MILLISECONDS.toMinutes(diff)
+    val horas = TimeUnit.MILLISECONDS.toHours(diff)
+    val dias = TimeUnit.MILLISECONDS.toDays(diff)
+
+    return when {
+        minutos < 1 -> "Creada hace un momento"
+        minutos < 60 -> "Creada hace $minutos min"
+        horas < 24 -> "Creada hace $horas ${if (horas == 1L) "hora" else "horas"}"
+        else -> "Creada hace $dias ${if (dias == 1L) "día" else "días"}"
     }
 }

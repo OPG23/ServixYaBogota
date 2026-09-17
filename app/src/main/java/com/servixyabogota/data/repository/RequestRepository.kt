@@ -2,196 +2,186 @@ package com.servixyabogota.data.repository
 
 import android.content.Context
 import android.net.Uri
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Query
-import com.google.firebase.storage.FirebaseStorage
-import com.servixyabogota.data.model.EstadoPropuesta
-import com.servixyabogota.data.model.EstadoSolicitud
 import com.servixyabogota.data.model.Propuesta
 import com.servixyabogota.data.model.Solicitud
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
-import java.util.UUID
 
-class SolicitudRepository(
-    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance(),
-    private val storage: FirebaseStorage = FirebaseStorage.getInstance()
-) {
-    private val solicitudesCollection = firestore.collection("solicitudes")
+class SolicitudRepository {
 
-    // =========================================================================
-    // 1. PUBLICAR SOLICITUD (Subir archivos + Firestore)
-    // =========================================================================
+    private val db: FirebaseFirestore = FirebaseFirestore.getInstance()
+
     suspend fun crearSolicitud(
         solicitud: Solicitud,
         urisArchivos: List<Uri>,
         context: Context
-    ): Result<String> {
+    ): Result<Unit> {
         return try {
-            val solicitudId = solicitudesCollection.document().id
-            val urlsDescarga = mutableListOf<String>()
-
-            // Subir archivos a Firebase Storage si existen
-            for ((index, uri) in urisArchivos.withIndex()) {
-                val extension = getExtensionFromUri(context, uri)
-                val fileName = "archivo_${index}_${System.currentTimeMillis()}.$extension"
-                val storageRef = storage.reference
-                    .child("solicitudes/${solicitud.clienteId}/$solicitudId/$fileName")
-
-                storageRef.putFile(uri).await()
-                val url = storageRef.downloadUrl.await().toString()
-                urlsDescarga.add(url)
-            }
-
-            // Crear el objeto final de Solicitud con las URLs obtenidas
-            val nuevaSolicitud = solicitud.copy(
-                id = solicitudId,
-                archivosUrls = urlsDescarga
-            )
-
-            // Guardar en Firestore
-            solicitudesCollection.document(solicitudId).set(nuevaSolicitud).await()
-
-            Result.success(solicitudId)
+            val docRef = db.collection("solicitudes").document()
+            val solicitudFinal = solicitud.copy(id = docRef.id)
+            docRef.set(solicitudFinal).await()
+            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    // =========================================================================
-    // 2. CONSULTA PARA CLIENTE ("Mis Solicitudes" en tiempo real)
-    // =========================================================================
     fun obtenerMisSolicitudesCliente(clienteId: String): Flow<List<Solicitud>> = callbackFlow {
-        val listener = solicitudesCollection
+        val listener = db.collection("solicitudes")
             .whereEqualTo("clienteId", clienteId)
-            .orderBy("fechaCreacion", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     close(error)
                     return@addSnapshotListener
                 }
-                val lista = snapshot?.toObjects(Solicitud::class.java) ?: emptyList()
-                trySend(lista)
-            }
-        awaitClose { listener.remove() }
-    }
 
-    // =========================================================================
-    // 3. CONSULTA PARA PRESTADOR ("Solicitudes Disponibles" en tiempo real)
-    // =========================================================================
-    fun obtenerSolicitudesDisponibles(
-        categoriasPrestador: List<String>,
-        localidadesFiltro: List<String> = emptyList()
-    ): Flow<List<Solicitud>> = callbackFlow {
-        if (categoriasPrestador.isEmpty()) {
-            trySend(emptyList())
-            return@callbackFlow
-        }
+                val lista = snapshot?.documents?.mapNotNull { doc ->
+                    doc.toObject(Solicitud::class.java)?.copy(id = doc.id)
+                } ?: emptyList()
 
-        // Firestore permite un máximo de 30 elementos en 'whereIn'
-        val categoriasProcesadas = categoriasPrestador.take(30)
-
-        var query: Query = solicitudesCollection
-            .whereIn("categoria", categoriasProcesadas)
-            .whereEqualTo("estado", EstadoSolicitud.PENDIENTE)
-
-        // Filtro opcional por localidad
-        if (localidadesFiltro.isNotEmpty()) {
-            val localidadesProcesadas = localidadesFiltro.take(30)
-            query = query.whereIn("localidad", localidadesProcesadas)
-        }
-
-        val listener = query.orderBy("fechaCreacion", Query.Direction.DESCENDING)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    close(error)
-                    return@addSnapshotListener
-                }
-                val lista = snapshot?.toObjects(Solicitud::class.java) ?: emptyList()
                 trySend(lista)
             }
 
         awaitClose { listener.remove() }
     }
 
-    // =========================================================================
-    // 4. CREAR PROPUESTA (Prestador cotiza la solicitud)
-    // =========================================================================
-    suspend fun enviarPropuesta(solicitudId: String, propuesta: Propuesta): Result<Boolean> {
-        return try {
-            val solicitudRef = solicitudesCollection.document(solicitudId)
-            val propuestaRef = solicitudRef.collection("propuestas").document()
-
-            firestore.runTransaction { transaction ->
-                val propuestaFinal = propuesta.copy(
-                    id = propuestaRef.id,
-                    solicitudId = solicitudId
-                )
-
-                // 1. Guardar la propuesta en la subcolección
-                transaction.set(propuestaRef, propuestaFinal)
-
-                // 2. Incrementar el contador de propuestas en la solicitud
-                transaction.update(solicitudRef, "cantidadPropuestas", FieldValue.increment(1))
-                transaction.update(solicitudRef, "fechaActualizacion", FieldValue.serverTimestamp())
-            }.await()
-
-            Result.success(true)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    // =========================================================================
-    // 5. CONSULTAR PROPUESTAS DE UNA SOLICITUD (Para el Cliente)
-    // =========================================================================
-    fun obtenerPropuestasDeSolicitud(solicitudId: String): Flow<List<Propuesta>> = callbackFlow {
-        val listener = solicitudesCollection.document(solicitudId)
-            .collection("propuestas")
-            .orderBy("fechaPropuesta", Query.Direction.DESCENDING)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    close(error)
-                    return@addSnapshotListener
-                }
-                val lista = snapshot?.toObjects(Propuesta::class.java) ?: emptyList()
-                trySend(lista)
-            }
-        awaitClose { listener.remove() }
-    }
-
-    // =========================================================================
-    // 6. ACEPTAR PROPUESTA (Cliente selecciona a un prestador)
-    // =========================================================================
-    suspend fun aceptarPropuesta(
+    suspend fun actualizarSolicitud(
         solicitudId: String,
-        propuestaId: String,
-        prestadorId: String
-    ): Result<Boolean> {
+        datosActualizados: Map<String, Any>
+    ): Result<Unit> {
         return try {
-            val solicitudRef = solicitudesCollection.document(solicitudId)
-            val propuestaRef = solicitudRef.collection("propuestas").document(propuestaId)
-
-            firestore.runTransaction { transaction ->
-                // Actualizar estado de la solicitud
-                transaction.update(solicitudRef, "estado", EstadoSolicitud.EN_PROCESO)
-                transaction.update(solicitudRef, "prestadorIdAsignado", prestadorId)
-                transaction.update(solicitudRef, "fechaActualizacion", FieldValue.serverTimestamp())
-
-                // Actualizar estado de la propuesta a ACEPTADA
-                transaction.update(propuestaRef, "estado", EstadoPropuesta.ACEPTADA)
-            }.await()
-
-            Result.success(true)
+            db.collection("solicitudes")
+                .document(solicitudId)
+                .update(datosActualizados)
+                .await()
+            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    private fun getExtensionFromUri(context: Context, uri: Uri): String {
-        return context.contentResolver.getType(uri)?.substringAfterLast("/") ?: "jpg"
+    suspend fun cancelarSolicitud(solicitudId: String): Result<Unit> {
+        return try {
+            db.collection("solicitudes")
+                .document(solicitudId)
+                .update("estado", "CANCELADA")
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ==========================================
+    // NUEVAS FUNCIONES PARA PRESTADORES
+    // ==========================================
+
+    // Función auxiliar para limpiar textos antes de comparar
+    private fun normalizarTexto(texto: String): String {
+        return texto.replace(Regex("[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]"), "")
+            .lowercase()
+            .trim()
+    }
+
+    fun obtenerSolicitudesDisponibles(
+        misCategorias: List<String>,
+        misLocalidades: List<String>
+    ): Flow<List<Solicitud>> = callbackFlow {
+        val listener = db.collection("solicitudes")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+
+                val categoriasNormalizadas = misCategorias.map { normalizarTexto(it) }
+                val localidadesNormalizadas = misLocalidades.map { normalizarTexto(it) }
+
+                val lista = snapshot?.documents?.mapNotNull { doc ->
+                    doc.toObject(Solicitud::class.java)?.copy(id = doc.id)
+                }?.filter { solicitud ->
+                    // 1. Estado abierto/pendiente
+                    val estado = solicitud.estado.toString().uppercase().trim()
+                    val esAbierta = estado.isBlank() || estado == "PENDIENTE" || estado == "ABIERTA"
+
+                    // 2. Coincidencia de Categoría (flexible)
+                    val catSolicitudNorm = normalizarTexto(solicitud.categoria)
+                    val coincideCategoria = misCategorias.isEmpty() || categoriasNormalizadas.any { catPrestador ->
+                        catSolicitudNorm.contains(catPrestador) || catPrestador.contains(catSolicitudNorm)
+                    }
+
+                    // 3. Coincidencia de Localidad (Si el prestador no seleccionó localidades, muestra todas)
+                    val locSolicitudNorm = normalizarTexto(solicitud.localidad)
+                    val coincideLocalidad = misLocalidades.isEmpty() || localidadesNormalizadas.any { locPrestador ->
+                        locSolicitudNorm.contains(locPrestador) || locPrestador.contains(locSolicitudNorm)
+                    }
+
+                    esAbierta && coincideCategoria && coincideLocalidad
+                } ?: emptyList()
+
+                trySend(lista)
+            }
+
+        awaitClose { listener.remove() }
+    }
+
+    suspend fun enviarPropuesta(
+        solicitudId: String,
+        propuesta: Propuesta
+    ): Result<Unit> {
+        return try {
+            db.collection("solicitudes")
+                .document(solicitudId)
+                .collection("propuestas")
+                .document(propuesta.prestadorId)
+                .set(propuesta)
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun actualizarSolicitudConArchivos(
+        solicitudId: String,
+        clienteId: String,
+        datos: Map<String, Any>,
+        archivosUris: List<Uri>
+    ): Result<Unit> {
+        return try {
+            val storageRef = com.google.firebase.storage.FirebaseStorage.getInstance().reference
+            val urlsFinales = mutableListOf<String>()
+
+            archivosUris.forEachIndexed { index, uri ->
+                val uriString = uri.toString()
+                // Si la URI ya es una URL web remota, se conserva sin resubir
+                if (uri.scheme == "http" || uri.scheme == "https" || uriString.startsWith("http")) {
+                    urlsFinales.add(uriString)
+                } else {
+                    // Sube el archivo nuevo respetando la jerarquía original
+                    val ref = storageRef.child("solicitudes/$clienteId/$solicitudId/media_${System.currentTimeMillis()}_$index")
+                    ref.putFile(uri).await()
+                    val urlDescarga = ref.downloadUrl.await().toString()
+                    urlsFinales.add(urlDescarga)
+                }
+            }
+
+            val datosCompletos = datos.toMutableMap().apply {
+                put("archivosUrls", urlsFinales)
+            }
+
+            com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                .collection("solicitudes")
+                .document(solicitudId)
+                .update(datosCompletos)
+                .await()
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 }

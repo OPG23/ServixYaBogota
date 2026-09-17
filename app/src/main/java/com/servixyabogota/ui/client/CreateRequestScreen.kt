@@ -26,6 +26,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import coil.compose.rememberAsyncImagePainter
+import com.servixyabogota.data.model.Solicitud
 
 data class ItemMediaSolicitud(
     val id: String = java.util.UUID.randomUUID().toString(),
@@ -53,6 +56,7 @@ data class ItemMediaSolicitud(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateRequestScreen(
+    solicitudToEdit: Solicitud? = null,
     onBack: () -> Unit = {},
     onPublicarSolicitud: (
         categoria: String,
@@ -61,20 +65,73 @@ fun CreateRequestScreen(
         direccion: String,
         urgencia: String,
         archivos: List<Uri>
-    ) -> Unit = { _, _, _, _, _, _ -> }
+    ) -> Unit = { _, _, _, _, _, _ -> },
+    onGuardarEdicion: (
+        solicitudId: String,
+        categoria: String,
+        detalle: String,
+        localidad: String,
+        direccion: String,
+        urgencia: String,
+        archivos: List<Uri>
+    ) -> Unit = { _, _, _, _, _, _, _ -> }
 ) {
     val context = LocalContext.current
-    var categoriaSeleccionada by remember { mutableStateOf("") }
+    val esEdicion = solicitudToEdit != null
+
+    val categoriasDisponibles = listOf(
+        "🪠 Plomería",
+        "⚡ Electricidad",
+        "🔑 Cerrajería",
+        "🎨 Pintura",
+        "🧹 Aseo y Limpieza",
+        "🔌 Reparación de Electrodomésticos",
+        "🪚 Carpintería"
+    )
+
+    val localidadesBogota = listOf(
+        "Usaquén", "Chapinero", "Suba", "Teusaquillo", "Kennedy",
+        "Engativá", "Fontibón", "Bosa", "Barrios Unidos", "Puente Aranda",
+        "Los Mártires", "Santa Fe", "San Cristóbal", "Usme", "Tunjuelito",
+        "Antonio Nariño", "Candelaria", "Rafael Uribe Uribe", "Ciudad Bolívar"
+    )
+
+    // Precargar datos si viene una solicitud a editar
+    var categoriaSeleccionada by remember(solicitudToEdit) {
+        mutableStateOf(
+            categoriasDisponibles.find { it.contains(solicitudToEdit?.categoria ?: "", ignoreCase = true) }
+                ?: solicitudToEdit?.categoria ?: ""
+        )
+    }
     var dropdownCategoriaExpanded by remember { mutableStateOf(false) }
 
-    var localidadSeleccionada by remember { mutableStateOf("") }
+    var localidadSeleccionada by remember(solicitudToEdit) {
+        mutableStateOf(solicitudToEdit?.localidad ?: "")
+    }
     var dropdownLocalidadExpanded by remember { mutableStateOf(false) }
 
-    var detalleProblema by remember { mutableStateOf("") }
-    var nivelUrgencia by remember { mutableStateOf("Media") }
-    var direccionBogota by remember { mutableStateOf("") }
+    var detalleProblema by remember(solicitudToEdit) {
+        mutableStateOf(solicitudToEdit?.detalleProblema ?: "")
+    }
+    var nivelUrgencia by remember(solicitudToEdit) {
+        mutableStateOf(if (solicitudToEdit?.nivelUrgencia.isNullOrBlank()) "Media" else solicitudToEdit!!.nivelUrgencia)
+    }
+    var direccionBogota by remember(solicitudToEdit) {
+        mutableStateOf(solicitudToEdit?.direccion ?: "")
+    }
 
-    var archivosAdjuntos by remember { mutableStateOf<List<ItemMediaSolicitud>>(emptyList()) }
+    // Inicializar lista de archivos remotos y locales
+    var archivosAdjuntos by remember(solicitudToEdit) {
+        val listaInicial: List<ItemMediaSolicitud> = solicitudToEdit?.archivosUrls?.map { url ->
+            val uri = Uri.parse(url)
+            ItemMediaSolicitud(
+                uri = uri,
+                esVideo = esVideoUri(context, uri)
+            )
+        } ?: emptyList()
+
+        mutableStateOf<List<ItemMediaSolicitud>>(listaInicial)
+    }
     var videoParaReproducir by remember { mutableStateOf<Uri?>(null) }
 
     val maxBytesPermitidos = 5 * 1024 * 1024L // 5 MB
@@ -93,7 +150,7 @@ fun CreateRequestScreen(
             if (pesoArchivo > maxBytesPermitidos) {
                 Toast.makeText(
                     context,
-                    "El archivo supera el límite de 5 MB. Por favor elige uno más liviano.",
+                    "El archivo supera el límite de 5 MB.",
                     Toast.LENGTH_LONG
                 ).show()
             } else {
@@ -105,38 +162,6 @@ fun CreateRequestScreen(
             }
         }
     }
-
-    val categoriasDisponibles = listOf(
-        "🪠 Plomería",
-        "⚡ Electricidad",
-        "🔑 Cerrajería",
-        "🎨 Pintura",
-        "🧹 Aseo y Limpieza",
-        "🔌 Reparación de Electrodomésticos",
-        "🪚 Carpintería"
-    )
-
-    val localidadesBogota = listOf(
-        "Usaquén",
-        "Chapinero",
-        "Suba",
-        "Teusaquillo",
-        "Kennedy",
-        "Engativá",
-        "Fontibón",
-        "Bosa",
-        "Barrios Unidos",
-        "Puente Aranda",
-        "Los Mártires",
-        "Santa Fe",
-        "San Cristóbal",
-        "Usme",
-        "Tunjuelito",
-        "Antonio Nariño",
-        "Candelaria",
-        "Rafael Uribe Uribe",
-        "Ciudad Bolívar"
-    )
 
     videoParaReproducir?.let { uri ->
         VideoPlayerDialog(
@@ -169,14 +194,29 @@ fun CreateRequestScreen(
                                 return@Button
                             }
 
-                            onPublicarSolicitud(
-                                categoriaSeleccionada,
-                                detalleProblema,
-                                localidadSeleccionada,
-                                direccionBogota,
-                                nivelUrgencia,
-                                archivosAdjuntos.map { it.uri }
-                            )
+                            // Limpiar icono emoji para guardar solo el texto base en BD
+                            val categoriaLimpia = categoriaSeleccionada.replace(Regex("^[^\b\\w]+"), "").trim()
+
+                            if (esEdicion && solicitudToEdit != null) {
+                                onGuardarEdicion(
+                                    solicitudToEdit.id,
+                                    categoriaLimpia,
+                                    detalleProblema,
+                                    localidadSeleccionada,
+                                    direccionBogota,
+                                    nivelUrgencia,
+                                    archivosAdjuntos.map { it.uri }
+                                )
+                            } else {
+                                onPublicarSolicitud(
+                                    categoriaLimpia,
+                                    detalleProblema,
+                                    localidadSeleccionada,
+                                    direccionBogota,
+                                    nivelUrgencia,
+                                    archivosAdjuntos.map { it.uri }
+                                )
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
                         shape = RoundedCornerShape(12.dp),
@@ -185,7 +225,7 @@ fun CreateRequestScreen(
                             .height(52.dp)
                     ) {
                         Text(
-                            text = "Publicar Solicitud",
+                            text = if (esEdicion) "Guardar Cambios" else "Publicar Solicitud",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -229,7 +269,7 @@ fun CreateRequestScreen(
                 Spacer(modifier = Modifier.width(16.dp))
 
                 Text(
-                    text = "Nueva Solicitud Técnica",
+                    text = if (esEdicion) "Editar Solicitud Técnica" else "Nueva Solicitud Técnica",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF0F172A)
@@ -387,7 +427,7 @@ fun CreateRequestScreen(
                 ) {
                     UrgenciaOptionButton(
                         text = "Baja",
-                        isSelected = nivelUrgencia == "Baja",
+                        isSelected = nivelUrgencia.contains("Baja", ignoreCase = true),
                         selectedBorderColor = Color(0xFF94A3B8),
                         selectedTextColor = Color(0xFF475569),
                         selectedBgColor = Color.White,
@@ -397,7 +437,7 @@ fun CreateRequestScreen(
 
                     UrgenciaOptionButton(
                         text = "Media",
-                        isSelected = nivelUrgencia == "Media",
+                        isSelected = nivelUrgencia.contains("Media", ignoreCase = true),
                         selectedBorderColor = Color(0xFFF59E0B),
                         selectedTextColor = Color(0xFFD97706),
                         selectedBgColor = Color(0xFFFFFBEB),
@@ -407,7 +447,7 @@ fun CreateRequestScreen(
 
                     UrgenciaOptionButton(
                         text = "Urgente 🚨",
-                        isSelected = nivelUrgencia == "Urgente",
+                        isSelected = nivelUrgencia.contains("Urgente", ignoreCase = true),
                         selectedBorderColor = Color(0xFFEF4444),
                         selectedTextColor = Color(0xFFDC2626),
                         selectedBgColor = Color(0xFFFEF2F2),

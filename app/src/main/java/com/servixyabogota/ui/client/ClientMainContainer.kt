@@ -1,12 +1,18 @@
 package com.servixyabogota.ui.client
 
+import android.widget.Toast
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.firebase.auth.FirebaseAuth
 
 @Composable
 fun ClientMainContainer(
+    viewModel: ClientViewModel = viewModel(),
     onLogout: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     var currentTab by rememberSaveable { mutableStateOf("Inicio") }
     var isCreatingRequest by rememberSaveable { mutableStateOf(false) }
 
@@ -20,8 +26,29 @@ fun ClientMainContainer(
         CreateRequestScreen(
             onBack = { isCreatingRequest = false },
             onPublicarSolicitud = { categoria, detalle, localidad, direccion, urgencia, archivos ->
-                // Aquí pasas estos 6 parámetros al ViewModel o backend
-                isCreatingRequest = false
+                val currentUser = FirebaseAuth.getInstance().currentUser
+                if (currentUser != null) {
+                    viewModel.publicarSolicitud(
+                        clienteId = currentUser.uid,
+                        clienteNombre = currentUser.displayName.orEmpty().ifBlank { "Cliente" },
+                        categoria = categoria,
+                        detalle = detalle,
+                        urgencia = urgencia,
+                        direccion = direccion,
+                        localidad = localidad,
+                        urisArchivos = archivos,
+                        context = context,
+                        onSuccess = {
+                            Toast.makeText(context, "¡Solicitud publicada con éxito!", Toast.LENGTH_SHORT).show()
+                            isCreatingRequest = false
+                        },
+                        onError = { error ->
+                            Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+                        }
+                    )
+                } else {
+                    Toast.makeText(context, "Error: Usuario no autenticado", Toast.LENGTH_SHORT).show()
+                }
             }
         )
     } else {
@@ -39,6 +66,7 @@ fun ClientMainContainer(
             }
             "Solicitudes" -> {
                 ClientRequestsScreen(
+                    viewModel = viewModel,
                     onNavigateTab = { selectedTab ->
                         currentSettingsSubScreen = null
                         selectedProposalRequestId = null
@@ -52,7 +80,7 @@ fun ClientMainContainer(
             }
             "Propuestas" -> {
                 if (selectedProposalRequestId != null) {
-                    // Pantalla de Propuestas Recibidas (#1024)
+                    // Pantalla de Propuestas Recibidas
                     ClientReceivedProposalsScreen(
                         solicitudId = selectedProposalRequestId!!,
                         onBack = { selectedProposalRequestId = null },
@@ -94,7 +122,7 @@ fun ClientMainContainer(
                             onBack = { currentTab = "Inicio" },
                             onNavigateToSecurity = { currentSettingsSubScreen = "security" },
                             onNavigateToReviews = { currentSettingsSubScreen = "reviews" },
-                            onLogout = onLogout // <--- Pasa el evento de logout recibido
+                            onLogout = onLogout
                         )
                     }
                 }
