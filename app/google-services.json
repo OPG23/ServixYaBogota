@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "247906765335",
+    "project_id": "servixyabogota",
+    "storage_bucket": "servixyabogota.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:247906765335:android:4a5f8be7027d4a66246a52",
+        "android_client_info": {
+          "package_name": "com.servixyabogota"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD17y-jv2QkPDzeCFIr2bKiRCSGdqAZtNI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
