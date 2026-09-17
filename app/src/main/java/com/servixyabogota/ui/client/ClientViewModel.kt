@@ -10,10 +10,22 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 
+import android.content.Context
+import android.net.Uri
+import androidx.lifecycle.viewModelScope
+import com.servixyabogota.data.model.Solicitud
+import com.servixyabogota.data.repository.SolicitudRepository
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
 class ClientViewModel : ViewModel() {
 
     private val auth = FirebaseAuth.getInstance()
     private val db = FirebaseFirestore.getInstance()
+
+    private val repository: SolicitudRepository = SolicitudRepository()
 
     // Estados del perfil
     var nombre by mutableStateOf("")
@@ -176,5 +188,44 @@ class ClientViewModel : ViewModel() {
             .addOnFailureListener { e ->
                 onError(e.localizedMessage ?: "Error al actualizar preferencias")
             }
+    }
+
+    fun publicarSolicitud(
+        clienteId: String,
+        clienteNombre: String,
+        categoria: String,
+        detalle: String,
+        urgencia: String,
+        direccion: String,
+        localidad: String,
+        urisArchivos: List<Uri>,
+        context: Context,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val solicitudTemp = Solicitud(
+                clienteId = clienteId,
+                clienteNombre = clienteNombre,
+                categoria = categoria,
+                detalleProblema = detalle,
+                nivelUrgencia = urgencia,
+                direccion = direccion,
+                localidad = localidad
+            )
+
+            val result = repository.crearSolicitud(solicitudTemp, urisArchivos, context)
+            if (result.isSuccess) {
+                onSuccess()
+            } else {
+                onError(result.exceptionOrNull()?.message ?: "Error al publicar la solicitud")
+            }
+        }
+    }
+
+    // Obtener "Mis Solicitudes"
+    fun getMisSolicitudes(clienteId: String): StateFlow<List<Solicitud>> {
+        return repository.obtenerMisSolicitudesCliente(clienteId)
+            .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     }
 }

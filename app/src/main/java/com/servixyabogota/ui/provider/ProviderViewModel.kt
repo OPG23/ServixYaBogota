@@ -16,6 +16,15 @@ import kotlinx.coroutines.tasks.await
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.EmailAuthProvider
 
+import androidx.lifecycle.viewModelScope
+import com.servixyabogota.data.model.Propuesta
+import com.servixyabogota.data.model.Solicitud
+import com.servixyabogota.data.repository.SolicitudRepository
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
 
 data class EstadoProveedorUiState(
     val nombreCompleto: String = "",
@@ -44,6 +53,8 @@ class ProviderViewModel : ViewModel() {
 
     private val _isUploading = MutableLiveData(false)
     val isUploading: LiveData<Boolean> = _isUploading
+
+    private val repository: SolicitudRepository = SolicitudRepository()
 
     init {
         cargarPerfil()
@@ -298,6 +309,36 @@ class ProviderViewModel : ViewModel() {
             .addOnFailureListener { e ->
                 onError(e.localizedMessage ?: "Error al actualizar preferencias")
             }
+    }
+
+    // Obtener solicitudes disponibles que coincidan con las categorías y localidades del prestador
+    fun getSolicitudesDisponibles(
+        misCategorias: List<String>,
+        misLocalidades: List<String>
+    ): StateFlow<List<Solicitud>> {
+        return repository.obtenerSolicitudesDisponibles(misCategorias, misLocalidades)
+            .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    }
+
+    // Responder / Cotizar una solicitud
+    fun enviarCotizacion(
+        solicitudId: String,
+        prestadorId: String,
+        prestadorNombre: String,
+        precio: Double,
+        mensaje: String,
+        onResult: (Boolean) -> Unit
+    ) {
+        viewModelScope.launch {
+            val propuesta = Propuesta(
+                prestadorId = prestadorId,
+                prestadorNombre = prestadorNombre,
+                precioEstimado = precio,
+                mensaje = mensaje
+            )
+            val result = repository.enviarPropuesta(solicitudId, propuesta)
+            onResult(result.isSuccess)
+        }
     }
 }
 
