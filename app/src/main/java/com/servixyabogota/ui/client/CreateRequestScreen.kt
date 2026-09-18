@@ -120,18 +120,24 @@ fun CreateRequestScreen(
         mutableStateOf(solicitudToEdit?.direccion ?: "")
     }
 
-    // Inicializar lista de archivos remotos y locales
-    var archivosAdjuntos by remember(solicitudToEdit) {
-        val listaInicial: List<ItemMediaSolicitud> = solicitudToEdit?.archivosUrls?.map { url ->
-            val uri = Uri.parse(url)
-            ItemMediaSolicitud(
-                uri = uri,
-                esVideo = esVideoUri(context, uri)
-            )
-        } ?: emptyList()
-
-        mutableStateOf<List<ItemMediaSolicitud>>(listaInicial)
+    // Inicializar lista de archivos remotos y locales mediante estado mutable
+    var archivosAdjuntos by remember {
+        mutableStateOf<List<ItemMediaSolicitud>>(emptyList())
     }
+
+    // Carga de archivos al iniciar edición o cuando solicitudToEdit cambie
+    LaunchedEffect(solicitudToEdit) {
+        if (solicitudToEdit != null && solicitudToEdit.archivosUrls.isNotEmpty()) {
+            archivosAdjuntos = solicitudToEdit.archivosUrls.map { url ->
+                val uri = Uri.parse(url)
+                ItemMediaSolicitud(
+                    uri = uri,
+                    esVideo = esVideoUri(context, uri)
+                )
+            }
+        }
+    }
+
     var videoParaReproducir by remember { mutableStateOf<Uri?>(null) }
 
     val maxBytesPermitidos = 5 * 1024 * 1024L // 5 MB
@@ -194,7 +200,6 @@ fun CreateRequestScreen(
                                 return@Button
                             }
 
-                            // Limpiar icono emoji para guardar solo el texto base en BD
                             val categoriaLimpia = categoriaSeleccionada.replace(Regex("^[^\b\\w]+"), "").trim()
 
                             if (esEdicion && solicitudToEdit != null) {
@@ -244,7 +249,7 @@ fun CreateRequestScreen(
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // 1. ENCABEZADO
+            // ENCABEZADO
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -276,7 +281,7 @@ fun CreateRequestScreen(
                 )
             }
 
-            // 2. CATEGORÍA DE SERVICIO
+            // CATEGORÍA DE SERVICIO
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = "Categoría de Servicio",
@@ -332,7 +337,7 @@ fun CreateRequestScreen(
                 }
             }
 
-            // 3. DETALLE DEL PROBLEMA
+            // DETALLE DEL PROBLEMA
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = "Detalle del problema",
@@ -366,7 +371,7 @@ fun CreateRequestScreen(
                 )
             }
 
-            // 4. FOTOS / VIDEOS (MÁX. 3)
+            // FOTOS / VIDEOS (MÁX. 3)
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     text = "FOTOS / VIDEOS DEL PROBLEMA (OPCIONAL)",
@@ -412,7 +417,7 @@ fun CreateRequestScreen(
                 }
             }
 
-            // 5. NIVEL DE URGENCIA
+            // NIVEL DE URGENCIA
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = "Nivel de Urgencia",
@@ -457,7 +462,7 @@ fun CreateRequestScreen(
                 }
             }
 
-            // 6. UBICACIÓN EN BOGOTÁ (LOCALIDAD + DIRECCIÓN)
+            // UBICACIÓN EN BOGOTÁ
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     text = "Ubicación en Bogotá",
@@ -466,7 +471,6 @@ fun CreateRequestScreen(
                     color = Color(0xFF0F172A)
                 )
 
-                // Dropdown Localidad
                 ExposedDropdownMenuBox(
                     expanded = dropdownLocalidadExpanded,
                     onExpandedChange = { dropdownLocalidadExpanded = !dropdownLocalidadExpanded }
@@ -521,7 +525,6 @@ fun CreateRequestScreen(
                     }
                 }
 
-                // Campo Dirección Exacta
                 OutlinedTextField(
                     value = direccionBogota,
                     onValueChange = { direccionBogota = it },
@@ -568,7 +571,7 @@ private fun MediaSlotItem(
         ) {
             if (item != null) {
                 Image(
-                    painter = rememberAsyncImagePainter(item.uri),
+                    painter = rememberAsyncImagePainter(model = item.uri.toString()),
                     contentDescription = if (item.esVideo) "Video cargado" else "Foto cargada",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
@@ -755,6 +758,10 @@ private fun UrgenciaOptionButton(
 }
 
 private fun obtenerTamanoArchivoBytes(context: Context, uri: Uri): Long {
+    val uriStr = uri.toString()
+    if (uriStr.startsWith("http://") || uriStr.startsWith("https://")) {
+        return 0L // Omitir límite local si ya está subido en la nube
+    }
     return try {
         context.contentResolver.openFileDescriptor(uri, "r")?.use {
             it.statSize
@@ -770,6 +777,10 @@ private fun esVideoUri(context: Context, uri: Uri?): Boolean {
     if (uriStr.startsWith("http://") || uriStr.startsWith("https://")) {
         return uriStr.contains(".mp4") || uriStr.contains(".mkv") || uriStr.contains(".3gp") || uriStr.contains(".webm") || uriStr.contains("video")
     }
-    val mimeType = context.contentResolver.getType(uri)
-    return mimeType?.startsWith("video/") == true
+    return try {
+        val mimeType = context.contentResolver.getType(uri)
+        mimeType?.startsWith("video/") == true
+    } catch (e: Exception) {
+        false
+    }
 }

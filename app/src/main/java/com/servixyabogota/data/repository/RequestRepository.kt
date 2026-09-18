@@ -3,6 +3,7 @@ package com.servixyabogota.data.repository
 import android.content.Context
 import android.net.Uri
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.storage.FirebaseStorage
 import com.servixyabogota.data.model.Propuesta
 import com.servixyabogota.data.model.Solicitud
 import kotlinx.coroutines.channels.awaitClose
@@ -13,6 +14,7 @@ import kotlinx.coroutines.tasks.await
 class SolicitudRepository {
 
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance()
+    private val storageRef = FirebaseStorage.getInstance().reference
 
     suspend fun crearSolicitud(
         solicitud: Solicitud,
@@ -21,7 +23,23 @@ class SolicitudRepository {
     ): Result<Unit> {
         return try {
             val docRef = db.collection("solicitudes").document()
-            val solicitudFinal = solicitud.copy(id = docRef.id)
+            val urlsFinales = mutableListOf<String>()
+
+            // 1. Subir archivos a Firebase Storage si se adjuntaron
+            urisArchivos.forEachIndexed { index, uri ->
+                val ref = storageRef.child("solicitudes/${solicitud.clienteId}/${docRef.id}/media_${System.currentTimeMillis()}_$index")
+                ref.putFile(uri).await()
+                val urlDescarga = ref.downloadUrl.await().toString()
+                urlsFinales.add(urlDescarga)
+            }
+
+            // 2. Asignar el ID generado y la lista de URLs públicas obtenidas
+            val solicitudFinal = solicitud.copy(
+                id = docRef.id,
+                archivosUrls = urlsFinales
+            )
+
+            // 3. Guardar el documento completo en Firestore
             docRef.set(solicitudFinal).await()
             Result.success(Unit)
         } catch (e: Exception) {
@@ -76,10 +94,9 @@ class SolicitudRepository {
     }
 
     // ==========================================
-    // NUEVAS FUNCIONES PARA PRESTADORES
+    // FUNCIONES PARA PRESTADORES
     // ==========================================
 
-    // Función auxiliar para limpiar textos antes de comparar
     private fun normalizarTexto(texto: String): String {
         return texto.replace(Regex("[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]"), "")
             .lowercase()
@@ -113,7 +130,7 @@ class SolicitudRepository {
                         catSolicitudNorm.contains(catPrestador) || catPrestador.contains(catSolicitudNorm)
                     }
 
-                    // 3. Coincidencia de Localidad (Si el prestador no seleccionó localidades, muestra todas)
+                    // 3. Coincidencia de Localidad
                     val locSolicitudNorm = normalizarTexto(solicitud.localidad)
                     val coincideLocalidad = misLocalidades.isEmpty() || localidadesNormalizadas.any { locPrestador ->
                         locSolicitudNorm.contains(locPrestador) || locPrestador.contains(locSolicitudNorm)
@@ -152,16 +169,13 @@ class SolicitudRepository {
         archivosUris: List<Uri>
     ): Result<Unit> {
         return try {
-            val storageRef = com.google.firebase.storage.FirebaseStorage.getInstance().reference
             val urlsFinales = mutableListOf<String>()
 
             archivosUris.forEachIndexed { index, uri ->
                 val uriString = uri.toString()
-                // Si la URI ya es una URL web remota, se conserva sin resubir
                 if (uri.scheme == "http" || uri.scheme == "https" || uriString.startsWith("http")) {
                     urlsFinales.add(uriString)
                 } else {
-                    // Sube el archivo nuevo respetando la jerarquía original
                     val ref = storageRef.child("solicitudes/$clienteId/$solicitudId/media_${System.currentTimeMillis()}_$index")
                     ref.putFile(uri).await()
                     val urlDescarga = ref.downloadUrl.await().toString()
@@ -173,8 +187,7 @@ class SolicitudRepository {
                 put("archivosUrls", urlsFinales)
             }
 
-            com.google.firebase.firestore.FirebaseFirestore.getInstance()
-                .collection("solicitudes")
+            db.collection("solicitudes")
                 .document(solicitudId)
                 .update(datosCompletos)
                 .await()
