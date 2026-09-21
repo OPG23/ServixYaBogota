@@ -52,7 +52,10 @@ class SolicitudRepository {
             .whereEqualTo("clienteId", clienteId)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    close(error)
+                    android.util.Log.e("SolicitudRepository", "Error en listener mis solicitudes: ${error.message}")
+                    // Si el error es por falta de permisos (ej. al cerrar sesión),
+                    // cerramos el flujo de forma segura sin romper la app.
+                    close()
                     return@addSnapshotListener
                 }
 
@@ -108,9 +111,12 @@ class SolicitudRepository {
         misLocalidades: List<String>
     ): Flow<List<Solicitud>> = callbackFlow {
         val listener = db.collection("solicitudes")
+            // 1. Filtrado en servidor para optimizar lectura y coincidir con las reglas
+            .whereIn("estado", listOf("PENDIENTE", "ABIERTA"))
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    close(error)
+                    // 2. Cierre seguro: evita tumbar la aplicación si fallan los permisos
+                    close()
                     return@addSnapshotListener
                 }
 
@@ -120,23 +126,17 @@ class SolicitudRepository {
                 val lista = snapshot?.documents?.mapNotNull { doc ->
                     doc.toObject(Solicitud::class.java)?.copy(id = doc.id)
                 }?.filter { solicitud ->
-                    // 1. Estado abierto/pendiente
-                    val estado = solicitud.estado.toString().uppercase().trim()
-                    val esAbierta = estado.isBlank() || estado == "PENDIENTE" || estado == "ABIERTA"
-
-                    // 2. Coincidencia de Categoría (flexible)
                     val catSolicitudNorm = normalizarTexto(solicitud.categoria)
                     val coincideCategoria = misCategorias.isEmpty() || categoriasNormalizadas.any { catPrestador ->
                         catSolicitudNorm.contains(catPrestador) || catPrestador.contains(catSolicitudNorm)
                     }
 
-                    // 3. Coincidencia de Localidad
                     val locSolicitudNorm = normalizarTexto(solicitud.localidad)
                     val coincideLocalidad = misLocalidades.isEmpty() || localidadesNormalizadas.any { locPrestador ->
                         locSolicitudNorm.contains(locPrestador) || locPrestador.contains(locSolicitudNorm)
                     }
 
-                    esAbierta && coincideCategoria && coincideLocalidad
+                    coincideCategoria && coincideLocalidad
                 } ?: emptyList()
 
                 trySend(lista)
