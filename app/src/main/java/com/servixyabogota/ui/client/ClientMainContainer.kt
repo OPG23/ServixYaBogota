@@ -5,7 +5,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.firebase.auth.FirebaseAuth
 
 @Composable
 fun ClientMainContainer(
@@ -26,29 +25,23 @@ fun ClientMainContainer(
         CreateRequestScreen(
             onBack = { isCreatingRequest = false },
             onPublicarSolicitud = { categoria, detalle, localidad, direccion, urgencia, archivos ->
-                val currentUser = FirebaseAuth.getInstance().currentUser
-                if (currentUser != null) {
-                    viewModel.publicarSolicitud(
-                        clienteId = currentUser.uid,
-                        clienteNombre = currentUser.displayName.orEmpty().ifBlank { "Cliente" },
-                        categoria = categoria,
-                        detalle = detalle,
-                        urgencia = urgencia,
-                        direccion = direccion,
-                        localidad = localidad,
-                        urisArchivos = archivos,
-                        context = context,
-                        onSuccess = {
-                            Toast.makeText(context, "¡Solicitud publicada con éxito!", Toast.LENGTH_SHORT).show()
-                            isCreatingRequest = false
-                        },
-                        onError = { error ->
-                            Toast.makeText(context, error, Toast.LENGTH_LONG).show()
-                        }
-                    )
-                } else {
-                    Toast.makeText(context, "Error: Usuario no autenticado", Toast.LENGTH_SHORT).show()
-                }
+                // NOTA: Ya no enviamos clienteId ni clienteNombre, el ViewModel los toma automáticamente
+                viewModel.publicarSolicitud(
+                    categoria = categoria,
+                    detalle = detalle,
+                    urgencia = urgencia,
+                    direccion = direccion,
+                    localidad = localidad,
+                    urisArchivos = archivos,
+                    context = context,
+                    onSuccess = {
+                        Toast.makeText(context, "¡Solicitud publicada con éxito!", Toast.LENGTH_SHORT).show()
+                        isCreatingRequest = false
+                    },
+                    onError = { error ->
+                        Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+                    }
+                )
             }
         )
     } else {
@@ -78,7 +71,7 @@ fun ClientMainContainer(
                     onVerChatClick = { }
                 )
             }
-            "Propuestas" -> {
+            "Propuestas", "Mensajes" -> {
                 if (selectedProposalRequestId != null) {
                     // Pantalla de Propuestas Recibidas
                     ClientReceivedProposalsScreen(
@@ -89,7 +82,7 @@ fun ClientMainContainer(
                         }
                     )
                 } else {
-                    // Pantalla Principal de Propuestas
+                    // Pantalla Principal de Propuestas / Mensajes
                     ClientProposalsScreen(
                         onNavigateTab = { selectedTab ->
                             currentSettingsSubScreen = null

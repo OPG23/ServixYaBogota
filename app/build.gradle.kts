@@ -76,4 +76,7 @@ dependencies {
     implementation("com.google.firebase:firebase-storage")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.compose.material:material-icons-extended")
+    // En build.gradle.kts (Module :app)
+    implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("io.coil-kt:coil-video:2.6.0") // <-- Permite extraer la miniatura del video
 }

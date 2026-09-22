@@ -26,8 +26,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -96,7 +94,6 @@ fun CreateRequestScreen(
         "Antonio Nariño", "Candelaria", "Rafael Uribe Uribe", "Ciudad Bolívar"
     )
 
-    // Precargar datos si viene una solicitud a editar
     var categoriaSeleccionada by remember(solicitudToEdit) {
         mutableStateOf(
             categoriasDisponibles.find { it.contains(solicitudToEdit?.categoria ?: "", ignoreCase = true) }
@@ -120,12 +117,10 @@ fun CreateRequestScreen(
         mutableStateOf(solicitudToEdit?.direccion ?: "")
     }
 
-    // Inicializar lista de archivos remotos y locales mediante estado mutable
     var archivosAdjuntos by remember {
         mutableStateOf<List<ItemMediaSolicitud>>(emptyList())
     }
 
-    // Carga de archivos al iniciar edición o cuando solicitudToEdit cambie
     LaunchedEffect(solicitudToEdit) {
         if (solicitudToEdit != null && solicitudToEdit.archivosUrls.isNotEmpty()) {
             archivosAdjuntos = solicitudToEdit.archivosUrls.map { url ->
@@ -139,7 +134,6 @@ fun CreateRequestScreen(
     }
 
     var videoParaReproducir by remember { mutableStateOf<Uri?>(null) }
-
     val maxBytesPermitidos = 5 * 1024 * 1024L // 5 MB
 
     val launcherMedia = rememberLauncherForActivityResult(
@@ -169,6 +163,8 @@ fun CreateRequestScreen(
         }
     }
 
+    var estaEnviando by remember { mutableStateOf(false) }
+
     videoParaReproducir?.let { uri ->
         VideoPlayerDialog(
             uri = uri,
@@ -186,6 +182,7 @@ fun CreateRequestScreen(
             ) {
                 Box(modifier = Modifier.padding(16.dp)) {
                     Button(
+                        enabled = !estaEnviando,
                         onClick = {
                             if (categoriaSeleccionada.isEmpty()) {
                                 Toast.makeText(context, "Por favor selecciona una categoría", Toast.LENGTH_SHORT).show()
@@ -200,6 +197,7 @@ fun CreateRequestScreen(
                                 return@Button
                             }
 
+                            estaEnviando = true
                             val categoriaLimpia = categoriaSeleccionada.replace(Regex("^[^\b\\w]+"), "").trim()
 
                             if (esEdicion && solicitudToEdit != null) {
@@ -223,18 +221,29 @@ fun CreateRequestScreen(
                                 )
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF2563EB),
+                            disabledContainerColor = Color(0xFF93C5FD)
+                        ),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp)
                     ) {
-                        Text(
-                            text = if (esEdicion) "Guardar Cambios" else "Publicar Solicitud",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
+                        if (estaEnviando) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(
+                                text = if (esEdicion) "Guardar Cambios" else "Publicar Solicitud",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
                     }
                 }
             }
@@ -570,29 +579,27 @@ private fun MediaSlotItem(
             contentAlignment = Alignment.Center
         ) {
             if (item != null) {
-                Image(
-                    painter = rememberAsyncImagePainter(model = item.uri.toString()),
-                    contentDescription = if (item.esVideo) "Video cargado" else "Foto cargada",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-
                 if (item.esVideo) {
                     Box(
                         modifier = Modifier
-                            .align(Alignment.Center)
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.6f)),
+                            .fillMaxSize()
+                            .background(Color(0xFF1E293B)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.PlayArrow,
                             contentDescription = "Reproducir Video",
                             tint = Color.White,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(32.dp)
                         )
                     }
+                } else {
+                    Image(
+                        painter = rememberAsyncImagePainter(model = item.uri),
+                        contentDescription = "Foto cargada",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
 
                 Box(
@@ -635,7 +642,7 @@ private fun MediaSlotItem(
         Spacer(modifier = Modifier.height(4.dp))
 
         Text(
-            text = if (item != null) (if (item.esVideo) "Video cargado" else "Foto cargada") else "Vacío",
+            text = if (item != null) (if (item.esVideo) "Video listo" else "Foto lista") else "Vacío",
             fontSize = 11.sp,
             color = Color(0xFF94A3B8),
             textAlign = TextAlign.Center,
@@ -760,7 +767,7 @@ private fun UrgenciaOptionButton(
 private fun obtenerTamanoArchivoBytes(context: Context, uri: Uri): Long {
     val uriStr = uri.toString()
     if (uriStr.startsWith("http://") || uriStr.startsWith("https://")) {
-        return 0L // Omitir límite local si ya está subido en la nube
+        return 0L
     }
     return try {
         context.contentResolver.openFileDescriptor(uri, "r")?.use {
@@ -771,15 +778,18 @@ private fun obtenerTamanoArchivoBytes(context: Context, uri: Uri): Long {
     }
 }
 
+// FUNCIÓN CORREGIDA PARA RECONOCER VIDEOS LOCALES Y REMOTOS
 private fun esVideoUri(context: Context, uri: Uri?): Boolean {
     if (uri == null) return false
     val uriStr = uri.toString().lowercase()
     if (uriStr.startsWith("http://") || uriStr.startsWith("https://")) {
-        return uriStr.contains(".mp4") || uriStr.contains(".mkv") || uriStr.contains(".3gp") || uriStr.contains(".webm") || uriStr.contains("video")
+        return uriStr.contains(".mp4") || uriStr.contains(".mov") ||
+                uriStr.contains(".mkv") || uriStr.contains(".webm") ||
+                uriStr.contains(".avi") || uriStr.contains("video")
     }
     return try {
-        val mimeType = context.contentResolver.getType(uri)
-        mimeType?.startsWith("video/") == true
+        val type = context.contentResolver.getType(uri)
+        type?.startsWith("video") == true
     } catch (e: Exception) {
         false
     }

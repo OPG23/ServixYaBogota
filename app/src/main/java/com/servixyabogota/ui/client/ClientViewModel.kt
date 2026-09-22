@@ -1,18 +1,17 @@
 package com.servixyabogota.ui.client
 
+import android.content.Context
+import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
-
-import android.content.Context
-import android.net.Uri
-import androidx.lifecycle.viewModelScope
 import com.servixyabogota.data.model.Solicitud
 import com.servixyabogota.data.repository.SolicitudRepository
 import kotlinx.coroutines.flow.SharingStarted
@@ -24,7 +23,6 @@ class ClientViewModel : ViewModel() {
 
     private val auth = FirebaseAuth.getInstance()
     private val db = FirebaseFirestore.getInstance()
-
     private val repository: SolicitudRepository = SolicitudRepository()
 
     // Estados del perfil
@@ -59,7 +57,6 @@ class ClientViewModel : ViewModel() {
                     val apellido = doc.getString("apellido") ?: doc.getString("apellidos") ?: ""
                     val nameAttr = doc.getString("name") ?: ""
 
-                    // Obtener el nombre completo
                     nombre = when {
                         !nombreCompletoDoc.isNullOrBlank() -> nombreCompletoDoc
                         primerNombre.isNotBlank() && apellido.isNotBlank() -> "$primerNombre $apellido"
@@ -71,11 +68,12 @@ class ClientViewModel : ViewModel() {
                     telefono = doc.getString("telefono") ?: doc.getString("phone") ?: ""
                     correo = doc.getString("correo") ?: doc.getString("email") ?: user.email ?: ""
                     ciudad = doc.getString("ciudad") ?: doc.getString("city") ?: "Bogotá, D.C."
-                    fotoUrl = doc.getString("fotoUrl") ?: doc.getString("photoUrl") ?: ""
+                    fotoUrl = doc.getString("fotoUrl") ?: doc.getString("photoUrl") ?: user.photoUrl?.toString() ?: ""
                     tipoCliente = doc.getString("tipoCliente") ?: "Cliente Residencial"
                 } else {
                     correo = user.email ?: ""
                     nombre = user.displayName ?: ""
+                    fotoUrl = user.photoUrl?.toString() ?: ""
                 }
                 estaCargando = false
             }
@@ -128,8 +126,118 @@ class ClientViewModel : ViewModel() {
     }
 
     /**
-     * Cerrar sesión en Firebase Auth
+     * Publica la solicitud tomando de forma segura clienteId, clienteNombre y clienteFotoUrl
      */
+    fun publicarSolicitud(
+        categoria: String,
+        detalle: String,
+        urgencia: String,
+        direccion: String,
+        localidad: String,
+        urisArchivos: List<Uri>,
+        context: Context,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val user = auth.currentUser
+        if (user == null) {
+            onError("Usuario no autenticado")
+            return
+        }
+
+        viewModelScope.launch {
+            val nombreFinal = if (nombre.isNotBlank()) nombre else (user.displayName ?: "Cliente ServixYa")
+            val fotoFinal = if (fotoUrl.isNotBlank()) fotoUrl else (user.photoUrl?.toString() ?: "")
+
+            val solicitudTemp = Solicitud(
+                clienteId = user.uid,
+                clienteNombre = nombreFinal,
+                clienteFotoUrl = fotoFinal,
+                categoria = categoria,
+                detalleProblema = detalle,
+                nivelUrgencia = urgencia,
+                direccion = direccion,
+                localidad = localidad
+            )
+
+            val result = repository.crearSolicitud(solicitudTemp, urisArchivos, context)
+            if (result.isSuccess) {
+                onSuccess()
+            } else {
+                onError(result.exceptionOrNull()?.message ?: "Error al publicar la solicitud")
+            }
+        }
+    }
+
+    /**
+     * Actualiza la solicitud sincronizando también nombre, foto y context
+     */
+    fun actualizarSolicitud(
+        solicitudId: String,
+        categoria: String,
+        detalle: String,
+        urgencia: String,
+        direccion: String,
+        localidad: String,
+        archivos: List<Uri>,
+        context: Context, // <-- AÑADIDO PARÁMETRO CONTEXT
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val user = auth.currentUser ?: run {
+            onError("Usuario no autenticado")
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val nombreFinal = if (nombre.isNotBlank()) nombre else (user.displayName ?: "Cliente ServixYa")
+                val fotoFinal = if (fotoUrl.isNotBlank()) fotoUrl else (user.photoUrl?.toString() ?: "")
+
+                val result = repository.actualizarSolicitudConArchivos(
+                    solicitudId = solicitudId,
+                    clienteId = user.uid,
+                    datos = mapOf(
+                        "categoria" to categoria,
+                        "detalleProblema" to detalle,
+                        "nivelUrgencia" to urgencia,
+                        "direccion" to direccion,
+                        "localidad" to localidad,
+                        "clienteNombre" to nombreFinal,
+                        "clienteFotoUrl" to fotoFinal
+                    ),
+                    archivosUris = archivos,
+                    context = context // <-- PASADO AL REPOSITORIO
+                )
+
+                if (result.isSuccess) {
+                    onSuccess()
+                } else {
+                    onError(result.exceptionOrNull()?.localizedMessage ?: "Error al actualizar")
+                }
+            } catch (e: Exception) {
+                onError(e.localizedMessage ?: "Error inesperado")
+            }
+        }
+    }
+
+    // Obtener "Mis Solicitudes"
+    fun getMisSolicitudes(clienteId: String): StateFlow<List<Solicitud>> {
+        return repository.obtenerMisSolicitudesCliente(clienteId)
+            .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    }
+
+    fun cancelarSolicitud(
+        solicitudId: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val result = repository.cancelarSolicitud(solicitudId)
+            if (result.isSuccess) onSuccess() else onError(result.exceptionOrNull()?.message ?: "Error al cancelar")
+        }
+    }
+
     fun cerrarSesion(onLogout: () -> Unit) {
         auth.signOut()
         onLogout()
@@ -188,93 +296,5 @@ class ClientViewModel : ViewModel() {
             .addOnFailureListener { e ->
                 onError(e.localizedMessage ?: "Error al actualizar preferencias")
             }
-    }
-
-    fun publicarSolicitud(
-        clienteId: String,
-        clienteNombre: String,
-        categoria: String,
-        detalle: String,
-        urgencia: String,
-        direccion: String,
-        localidad: String,
-        urisArchivos: List<Uri>,
-        context: Context,
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit
-    ) {
-        viewModelScope.launch {
-            val solicitudTemp = Solicitud(
-                clienteId = clienteId,
-                clienteNombre = clienteNombre,
-                categoria = categoria,
-                detalleProblema = detalle,
-                nivelUrgencia = urgencia,
-                direccion = direccion,
-                localidad = localidad
-            )
-
-            val result = repository.crearSolicitud(solicitudTemp, urisArchivos, context)
-            if (result.isSuccess) {
-                onSuccess()
-            } else {
-                onError(result.exceptionOrNull()?.message ?: "Error al publicar la solicitud")
-            }
-        }
-    }
-
-    // Obtener "Mis Solicitudes"
-    fun getMisSolicitudes(clienteId: String): StateFlow<List<Solicitud>> {
-        return repository.obtenerMisSolicitudesCliente(clienteId)
-            .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
-    }
-
-    fun actualizarSolicitud(
-        solicitudId: String,
-        clienteId: String,
-        categoria: String,
-        detalle: String,
-        urgencia: String,
-        direccion: String,
-        localidad: String,
-        archivos: List<Uri>,
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit
-    ) {
-        viewModelScope.launch {
-            try {
-                val result = repository.actualizarSolicitudConArchivos(
-                    solicitudId = solicitudId,
-                    clienteId = clienteId,
-                    datos = mapOf(
-                        "categoria" to categoria,
-                        "detalleProblema" to detalle,
-                        "nivelUrgencia" to urgencia,
-                        "direccion" to direccion,
-                        "localidad" to localidad
-                    ),
-                    archivosUris = archivos
-                )
-
-                if (result.isSuccess) {
-                    onSuccess()
-                } else {
-                    onError(result.exceptionOrNull()?.localizedMessage ?: "Error al actualizar")
-                }
-            } catch (e: Exception) {
-                onError(e.localizedMessage ?: "Error inesperado")
-            }
-        }
-    }
-
-    fun cancelarSolicitud(
-        solicitudId: String,
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit
-    ) {
-        viewModelScope.launch {
-            val result = repository.cancelarSolicitud(solicitudId)
-            if (result.isSuccess) onSuccess() else onError(result.exceptionOrNull()?.message ?: "Error al cancelar")
-        }
     }
 }

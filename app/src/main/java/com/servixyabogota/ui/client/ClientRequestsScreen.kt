@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,6 +39,8 @@ fun ClientRequestsScreen(
     onVerChatClick: (Solicitud) -> Unit = {},
     onNavigateTab: (String) -> Unit = {}
 ) {
+    val context = LocalContext.current // <-- OBTENEMOS EL CONTEXTO DE LA APLICACIÓN
+
     var filtroSeleccionado by remember { mutableStateOf("Abiertas") }
     var solicitudAEditar by remember { mutableStateOf<Solicitud?>(null) }
     var solicitudACancelar by remember { mutableStateOf<Solicitud?>(null) }
@@ -51,13 +54,13 @@ fun ClientRequestsScreen(
             onGuardarEdicion = { id, cat, det, loc, dir, urg, archivos ->
                 viewModel.actualizarSolicitud(
                     solicitudId = id,
-                    clienteId = solicitudParaEditar.clienteId, // Pasa el clienteId correcto
                     categoria = cat,
                     detalle = det,
                     urgencia = urg,
                     direccion = dir,
                     localidad = loc,
                     archivos = archivos,
+                    context = context, // <-- PARÁMETRO 'context' AGREGADO
                     onSuccess = { solicitudAEditar = null },
                     onError = { /* Manejar error si ocurre */ }
                 )
@@ -66,15 +69,20 @@ fun ClientRequestsScreen(
         return
     }
 
-    // Obtener UID del usuario autenticado actual
+    // 1. Obtener UID del usuario autenticado actual PRIMERO
     val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
 
-    // Obtener el Flow/StateFlow desde el ViewModel
-    val listaSolicitudes by remember(currentUserId) {
+    // 2. Obtener la lista original desde el ViewModel
+    val listaSolicitudesRaw by remember(currentUserId) {
         viewModel.getMisSolicitudes(currentUserId)
     }.collectAsState(initial = emptyList())
 
-    // Clasificación de listas según el estado
+    // 3. Filtrar duplicados por ID
+    val listaSolicitudes = remember(listaSolicitudesRaw) {
+        listaSolicitudesRaw.distinctBy { it.id }
+    }
+
+    // 4. Clasificación de listas según el estado
     val abiertas = remember(listaSolicitudes) {
         listaSolicitudes.filter { esEstadoPendiente(it.estado) }
     }

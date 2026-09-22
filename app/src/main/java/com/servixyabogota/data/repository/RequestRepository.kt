@@ -2,6 +2,7 @@ package com.servixyabogota.data.repository
 
 import android.content.Context
 import android.net.Uri
+import android.webkit.MimeTypeMap
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 import com.servixyabogota.data.model.Propuesta
@@ -10,41 +11,46 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import java.util.UUID
 
 class SolicitudRepository {
 
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance()
     private val storageRef = FirebaseStorage.getInstance().reference
 
+    // Función auxiliar para obtener la extensión del archivo según su Uri
+    private fun obtenerExtension(context: Context, uri: Uri): String {
+        return context.contentResolver.getType(uri)?.let { mime ->
+            MimeTypeMap.getSingleton().getExtensionFromMimeType(mime)
+        } ?: if (uri.toString().lowercase().contains("video")) "mp4" else "jpg"
+    }
+
     suspend fun crearSolicitud(
         solicitud: Solicitud,
-        urisArchivos: List<Uri>,
+        uris: List<Uri>,
         context: Context
-    ): Result<Unit> {
-        return try {
-            val docRef = db.collection("solicitudes").document()
-            val urlsFinales = mutableListOf<String>()
+    ): Result<Boolean> = try {
+        val urlsSubidas = mutableListOf<String>()
 
-            // 1. Subir archivos a Firebase Storage si se adjuntaron
-            urisArchivos.forEachIndexed { index, uri ->
-                val ref = storageRef.child("solicitudes/${solicitud.clienteId}/${docRef.id}/media_${System.currentTimeMillis()}_$index")
+        for (uri in uris) {
+            if (uri.toString().startsWith("http")) {
+                urlsSubidas.add(uri.toString())
+            } else {
+                val extension = obtenerExtension(context, uri)
+                val fileName = "solicitudes/${UUID.randomUUID()}.$extension"
+                val ref = storageRef.child(fileName)
                 ref.putFile(uri).await()
-                val urlDescarga = ref.downloadUrl.await().toString()
-                urlsFinales.add(urlDescarga)
+                val downloadUrl = ref.downloadUrl.await().toString()
+                urlsSubidas.add(downloadUrl)
             }
-
-            // 2. Asignar el ID generado y la lista de URLs públicas obtenidas
-            val solicitudFinal = solicitud.copy(
-                id = docRef.id,
-                archivosUrls = urlsFinales
-            )
-
-            // 3. Guardar el documento completo en Firestore
-            docRef.set(solicitudFinal).await()
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
         }
+
+        val solicitudFinal = solicitud.copy(archivosUrls = urlsSubidas)
+        db.collection("solicitudes").add(solicitudFinal).await()
+
+        Result.success(true)
+    } catch (e: Exception) {
+        Result.failure(e)
     }
 
     fun obtenerMisSolicitudesCliente(clienteId: String): Flow<List<Solicitud>> = callbackFlow {
@@ -53,8 +59,6 @@ class SolicitudRepository {
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     android.util.Log.e("SolicitudRepository", "Error en listener mis solicitudes: ${error.message}")
-                    // Si el error es por falta de permisos (ej. al cerrar sesión),
-                    // cerramos el flujo de forma segura sin romper la app.
                     close()
                     return@addSnapshotListener
                 }
@@ -111,11 +115,9 @@ class SolicitudRepository {
         misLocalidades: List<String>
     ): Flow<List<Solicitud>> = callbackFlow {
         val listener = db.collection("solicitudes")
-            // 1. Filtrado en servidor para optimizar lectura y coincidir con las reglas
             .whereIn("estado", listOf("PENDIENTE", "ABIERTA"))
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    // 2. Cierre seguro: evita tumbar la aplicación si fallan los permisos
                     close()
                     return@addSnapshotListener
                 }
@@ -166,7 +168,8 @@ class SolicitudRepository {
         solicitudId: String,
         clienteId: String,
         datos: Map<String, Any>,
-        archivosUris: List<Uri>
+        archivosUris: List<Uri>,
+        context: Context
     ): Result<Unit> {
         return try {
             val urlsFinales = mutableListOf<String>()
@@ -176,7 +179,8 @@ class SolicitudRepository {
                 if (uri.scheme == "http" || uri.scheme == "https" || uriString.startsWith("http")) {
                     urlsFinales.add(uriString)
                 } else {
-                    val ref = storageRef.child("solicitudes/$clienteId/$solicitudId/media_${System.currentTimeMillis()}_$index")
+                    val extension = obtenerExtension(context, uri)
+                    val ref = storageRef.child("solicitudes/$clienteId/$solicitudId/media_${System.currentTimeMillis()}_$index.$extension")
                     ref.putFile(uri).await()
                     val urlDescarga = ref.downloadUrl.await().toString()
                     urlsFinales.add(urlDescarga)
