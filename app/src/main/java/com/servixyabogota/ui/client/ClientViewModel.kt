@@ -143,6 +143,55 @@ class ClientViewModel : ViewModel() {
     }
 
     /**
+     * Crea un canal de chat directo en Firestore entre el cliente autenticado y el prestador
+     */
+    fun obtenerOCrearChatDirecto(
+        prestadorId: String,
+        onSuccess: (chatId: String) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val clienteId = auth.currentUser?.uid
+        if (clienteId.isNullOrEmpty()) {
+            onError("Debes iniciar sesión para escribir a un prestador")
+            return
+        }
+
+        // Crea un ID determinista para evitar duplicar salas entre los dos mismos usuarios
+        val chatIdConstruido = if (clienteId < prestadorId) {
+            "chat_${clienteId}_$prestadorId"
+        } else {
+            "chat_${prestadorId}_$clienteId"
+        }
+
+        val chatRef = db.collection("chats").document(chatIdConstruido)
+
+        chatRef.get().addOnSuccessListener { doc ->
+            if (doc.exists()) {
+                onSuccess(chatIdConstruido)
+            } else {
+                val nuevoChat = hashMapOf(
+                    "clienteId" to clienteId,
+                    "prestadorId" to prestadorId,
+                    "usuarios" to listOf(clienteId, prestadorId),
+                    "fechaCreacion" to Timestamp.now(),
+                    "ultimoMensaje" to "Conversación iniciada",
+                    "fechaUltimoMensaje" to Timestamp.now()
+                )
+
+                chatRef.set(nuevoChat, SetOptions.merge())
+                    .addOnSuccessListener {
+                        onSuccess(chatIdConstruido)
+                    }
+                    .addOnFailureListener { e ->
+                        onError(e.localizedMessage ?: "Error al iniciar el chat")
+                    }
+            }
+        }.addOnFailureListener { e ->
+            onError(e.localizedMessage ?: "Error al verificar la conversación")
+        }
+    }
+
+    /**
      * Carga la información del usuario cliente
      */
     fun cargarPerfilCliente() {

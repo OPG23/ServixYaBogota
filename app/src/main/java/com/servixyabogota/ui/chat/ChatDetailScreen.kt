@@ -34,37 +34,33 @@ import java.util.Locale
 @Composable
 fun ChatDetailScreen(
     chatId: String,
-    currentUserId: String = "usuario_demo", // Pasa el ID del usuario actual aquí
+    currentUserId: String = "usuario_demo",
     esCliente: Boolean = true,
-    interlocutorNombre: String = "", // Nombre del receptor (Cliente o Prestador)
+    interlocutorNombre: String = "",
     subtituloOnline: String = "En línea",
-    solicitudInfo: String? = null, // Si es nulo, oculta el banner superior
-    actionButtonText: String? = null, // Ej: "Confirmar Servicio" o "Enviar Cotización"
+    solicitudInfo: String? = null,
+    actionButtonText: String? = null,
     onActionButtonClick: (() -> Unit)? = null,
     viewModel: ChatViewModel = viewModel(),
     onBack: () -> Unit = {}
 ) {
     var messageText by remember { mutableStateOf("") }
 
-    // 1. Inicialización en Firestore al abrir la pantalla
+    // CORRECCIÓN: Se cambió 'solicitudId =' por 'chatId ='
     LaunchedEffect(chatId, currentUserId, esCliente) {
         viewModel.inicializarChat(
-            solicitudId = chatId,
+            chatId = chatId,
             currentUserId = currentUserId,
             esCliente = esCliente
         )
     }
 
-    // 2. Colectamos el estado en vivo desde el StateFlow del ViewModel
     val uiState by viewModel.uiState.collectAsState()
-
-    // Nombre a mostrar en el header (usa el del parámetro o el de Firestore)
     val nombreMostrar = interlocutorNombre.ifBlank { uiState.nombreContraparte.ifEmpty { "Usuario" } }
 
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
-    // 3. Scroll automático al recibir/enviar un mensaje
     LaunchedEffect(uiState.mensajes.size) {
         if (uiState.mensajes.isNotEmpty()) {
             listState.animateScrollToItem(uiState.mensajes.size - 1)
@@ -75,7 +71,6 @@ fun ChatDetailScreen(
         containerColor = Color.White,
         topBar = {
             Column(modifier = Modifier.fillMaxWidth().statusBarsPadding()) {
-                // TOP BAR
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -92,7 +87,6 @@ fun ChatDetailScreen(
 
                     Spacer(modifier = Modifier.width(4.dp))
 
-                    // Avatar con indicador En Línea
                     Box(contentAlignment = Alignment.BottomEnd) {
                         Box(
                             modifier = Modifier
@@ -109,7 +103,6 @@ fun ChatDetailScreen(
                             )
                         }
 
-                        // Punto verde
                         Box(
                             modifier = Modifier
                                 .size(12.dp)
@@ -148,7 +141,6 @@ fun ChatDetailScreen(
 
                 HorizontalDivider(color = Color(0xFFF1F5F9))
 
-                // BANNER DE CONTEXTO DE SOLICITUD
                 if (!solicitudInfo.isNullOrEmpty()) {
                     Surface(
                         color = Color(0xFFE0F2FE),
@@ -201,7 +193,6 @@ fun ChatDetailScreen(
             }
         },
         bottomBar = {
-            // BARRA INFERIOR DE ENVÍO
             Surface(
                 color = Color.White,
                 tonalElevation = 8.dp,
@@ -257,7 +248,6 @@ fun ChatDetailScreen(
                                     val texto = messageText.trim()
                                     messageText = ""
 
-                                    // Enviar mensaje real a Firestore a través del ViewModel
                                     viewModel.enviarMensaje(texto)
 
                                     coroutineScope.launch {

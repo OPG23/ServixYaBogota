@@ -99,10 +99,20 @@ fun ClientMainContainer(
             prestador = selectedProvider,
             onBack = { selectedProviderId = null },
             onIniciarChat = {
-                chatClienteActivo = ChatClienteUi(
-                    id = "chat_${selectedProvider.id}",
-                    nombrePrestador = selectedProvider.nombre,
-                    tituloSolicitud = null
+                // CREACIÓN/CONSULTA DE CHAT REAL EN FIRESTORE
+                viewModel.obtenerOCrearChatDirecto(
+                    prestadorId = selectedProvider.id,
+                    onSuccess = { chatIdReal ->
+                        selectedProviderId = null
+                        chatClienteActivo = ChatClienteUi(
+                            id = chatIdReal,
+                            nombrePrestador = selectedProvider.nombre,
+                            tituloSolicitud = null
+                        )
+                    },
+                    onError = { error ->
+                        Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+                    }
                 )
             }
         )
@@ -120,10 +130,19 @@ fun ClientMainContainer(
                         currentTab = selectedTab
                     },
                     onIniciarChat = { prestador ->
-                        chatClienteActivo = ChatClienteUi(
-                            id = "chat_${prestador.id}",
-                            nombrePrestador = prestador.nombre,
-                            tituloSolicitud = null
+                        // CREACIÓN/CONSULTA DE CHAT REAL EN FIRESTORE DESDE INICIO
+                        viewModel.obtenerOCrearChatDirecto(
+                            prestadorId = prestador.id,
+                            onSuccess = { chatIdReal ->
+                                chatClienteActivo = ChatClienteUi(
+                                    id = chatIdReal,
+                                    nombrePrestador = prestador.nombre,
+                                    tituloSolicitud = null
+                                )
+                            },
+                            onError = { error ->
+                                Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+                            }
                         )
                     },
                     onVerPerfilPrestador = { prestador ->

@@ -44,22 +44,16 @@ fun ChatScreen(
     val uiState by viewModel.uiState.collectAsState()
     var mensajeTexto by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
-    // Dentro de ChatScreen.kt:
 
-// Color primario según la identidad
-    val colorTema = if (esCliente) Color(0xFF1976D2) else Color(0xFFFF8F00) // Azul para Cliente, Naranja para Prestador
-    val colorBurbujaPropia = if (esCliente) Color(0xFFE3F2FD) else Color(0xFFFFF3E0)
-
-    // Cargar datos en vivo
-    LaunchedEffect(solicitudId, currentUserId) {
+    // CORRECCIÓN: Se pasó 'chatId = solicitudId' a la función del ViewModel
+    LaunchedEffect(solicitudId, currentUserId, esCliente) {
         viewModel.inicializarChat(
-            solicitudId = solicitudId,
+            chatId = solicitudId,
             currentUserId = currentUserId,
             esCliente = esCliente
         )
     }
 
-    // Auto-scroll al enviar o recibir mensajes
     LaunchedEffect(uiState.mensajes.size) {
         if (uiState.mensajes.isNotEmpty()) {
             listState.animateScrollToItem(uiState.mensajes.size - 1)
@@ -69,7 +63,6 @@ fun ChatScreen(
     Scaffold(
         topBar = {
             Column {
-                // 1. TOP BAR PRINCIPAL
                 Surface(
                     color = Color.White,
                     shadowElevation = 1.dp
@@ -95,7 +88,6 @@ fun ChatScreen(
                                 )
                             }
 
-                            // Avatar con indicador de 'En línea'
                             Box {
                                 Surface(
                                     modifier = Modifier.size(42.dp),
@@ -125,7 +117,6 @@ fun ChatScreen(
                                     }
                                 }
 
-                                // Punto verde 'En línea'
                                 Box(
                                     modifier = Modifier
                                         .size(11.dp)
@@ -165,7 +156,6 @@ fun ChatScreen(
                     }
                 }
 
-                // 2. BANNER INFORMATIVO DE LA SOLICITUD
                 Surface(
                     color = Color(0xFFE3F2FD),
                     modifier = Modifier.fillMaxWidth()
@@ -192,7 +182,6 @@ fun ChatScreen(
             }
         },
         bottomBar = {
-            // BARRA DE INPUT DE MENSAJE
             Surface(
                 color = Color.White,
                 modifier = Modifier
@@ -322,7 +311,6 @@ private fun BurbujaMensajeExacta(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (esMio) Alignment.End else Alignment.Start
     ) {
-        // Burbuja de texto
         Surface(
             color = if (esMio) Color(0xFF1E88E5) else Color(0xFFE5E5E5),
             shape = RoundedCornerShape(16.dp),
@@ -339,7 +327,6 @@ private fun BurbujaMensajeExacta(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // Hora y Double Checkmark
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(3.dp),
@@ -361,7 +348,6 @@ private fun BurbujaMensajeExacta(
             }
         }
 
-        // MOSTRAR BOTÓN "Confirmar Servicio" SI CORRESPONDE A UNA OFERTA/PROPUESTA
         if (!esMio && esCliente && (mensaje.esPropuesta || mensaje.montoPropuesta > 0) && estadoPropuesta == "PENDIENTE") {
             Spacer(modifier = Modifier.height(8.dp))
 

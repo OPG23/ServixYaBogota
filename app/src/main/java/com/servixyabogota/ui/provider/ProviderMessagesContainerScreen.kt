@@ -21,6 +21,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.firebase.Timestamp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
 data class ChatItemUi(
     val id: String,
@@ -37,37 +43,156 @@ fun ProviderMessagesContainerScreen(
 ) {
     var selectedSubTab by remember { mutableIntStateOf(0) } // 0: Solicitudes, 1: Contacto Directo
 
-    val chatsSolicitudes = remember {
-        listOf(
-            ChatItemUi(
-                id = "sol_101",
-                nombreCliente = "Carlos Mendoza",
-                ultimoMensaje = "¿A qué hora podrías venir a revisar la fuga?",
-                hora = "10:30 AM",
-                noLeidos = 2,
-                tituloSolicitud = "Plomería · Reparación Tubo PVC"
-            ),
-            ChatItemUi(
-                id = "sol_102",
-                nombreCliente = "Beatriz Gómez",
-                ultimoMensaje = "Perfecto, acepto el presupuesto.",
-                hora = "Ayer",
-                noLeidos = 0,
-                tituloSolicitud = "Electricidad · Instalación Lámparas"
-            )
-        )
-    }
+    var chatsSolicitudes by remember { mutableStateOf<List<ChatItemUi>>(emptyList()) }
+    var chatsDirectos by remember { mutableStateOf<List<ChatItemUi>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
 
-    val chatsDirectos = remember {
-        listOf(
-            ChatItemUi(
-                id = "dir_201",
-                nombreCliente = "Andrés López",
-                ultimoMensaje = "Hola, vi tu perfil y me interesa una cotización.",
-                hora = "09:15 AM",
-                noLeidos = 1
-            )
-        )
+    val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
+    val db = remember { FirebaseFirestore.getInstance() }
+
+    // Escuchador en tiempo real de Firestore para el prestador
+    DisposableEffect(currentUserId) {
+        if (currentUserId.isBlank()) {
+            isLoading = false
+            onDispose { }
+        }
+
+        // 1. Escuchar Chats por Solicitudes
+        val listenerSolicitudes = db.collection("solicitudes")
+            .whereEqualTo("prestadorId", currentUserId)
+            .addSnapshotListener { snapshot, error ->
+                if (error == null && snapshot != null) {
+                    val listaTemp = mutableListOf<ChatItemUi>()
+                    val totalDocs = snapshot.documents.size
+
+                    if (totalDocs == 0) {
+                        chatsSolicitudes = emptyList()
+                        isLoading = false
+                    } else {
+                        var procesados = 0
+                        for (doc in snapshot.documents) {
+                            val chatId = doc.id
+                            val clienteId = doc.getString("clienteId") ?: ""
+                            val ultimoMsg = doc.getString("ultimoMensaje") ?: "Solicitud iniciada"
+                            val timestamp = doc.getTimestamp("fechaUltimoMensaje")
+                            val horaFormateada = formatearFecha(timestamp)
+                            val tituloServicio = doc.getString("titulo")
+                                ?: doc.getString("categoria")
+                                ?: doc.getString("servicio")
+                                ?: "Solicitud de Servicio"
+
+                            if (clienteId.isNotBlank()) {
+                                db.collection("usuarios").document(clienteId).get()
+                                    .addOnSuccessListener { clientDoc ->
+                                        val nombreCliente = clientDoc.getString("nombreCompleto")
+                                            ?: clientDoc.getString("nombre")
+                                            ?: "Cliente"
+
+                                        listaTemp.add(
+                                            ChatItemUi(
+                                                id = chatId,
+                                                nombreCliente = nombreCliente,
+                                                ultimoMensaje = ultimoMsg,
+                                                hora = horaFormateada,
+                                                noLeidos = 0,
+                                                tituloSolicitud = tituloServicio
+                                            )
+                                        )
+                                        procesados++
+                                        if (procesados == totalDocs) {
+                                            chatsSolicitudes = listaTemp
+                                            isLoading = false
+                                        }
+                                    }
+                                    .addOnFailureListener {
+                                        procesados++
+                                        if (procesados == totalDocs) {
+                                            chatsSolicitudes = listaTemp
+                                            isLoading = false
+                                        }
+                                    }
+                            } else {
+                                procesados++
+                                if (procesados == totalDocs) {
+                                    chatsSolicitudes = listaTemp
+                                    isLoading = false
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    isLoading = false
+                }
+            }
+
+        // 2. Escuchar Chats Directos
+        val listenerDirectos = db.collection("chats")
+            .whereEqualTo("prestadorId", currentUserId)
+            .addSnapshotListener { snapshot, error ->
+                if (error == null && snapshot != null) {
+                    val listaTemp = mutableListOf<ChatItemUi>()
+                    val totalDocs = snapshot.documents.size
+
+                    if (totalDocs == 0) {
+                        chatsDirectos = emptyList()
+                        isLoading = false
+                    } else {
+                        var procesados = 0
+                        for (doc in snapshot.documents) {
+                            val chatId = doc.id
+                            val clienteId = doc.getString("clienteId") ?: ""
+                            val ultimoMsg = doc.getString("ultimoMensaje") ?: "Contacto directo"
+                            val timestamp = doc.getTimestamp("fechaUltimoMensaje")
+                            val horaFormateada = formatearFecha(timestamp)
+
+                            if (clienteId.isNotBlank()) {
+                                db.collection("usuarios").document(clienteId).get()
+                                    .addOnSuccessListener { clientDoc ->
+                                        val nombreCliente = clientDoc.getString("nombreCompleto")
+                                            ?: clientDoc.getString("nombre")
+                                            ?: "Cliente Directo"
+
+                                        listaTemp.add(
+                                            ChatItemUi(
+                                                id = chatId,
+                                                nombreCliente = nombreCliente,
+                                                ultimoMensaje = ultimoMsg,
+                                                hora = horaFormateada,
+                                                noLeidos = 0,
+                                                tituloSolicitud = null
+                                            )
+                                        )
+                                        procesados++
+                                        if (procesados == totalDocs) {
+                                            chatsDirectos = listaTemp
+                                            isLoading = false
+                                        }
+                                    }
+                                    .addOnFailureListener {
+                                        procesados++
+                                        if (procesados == totalDocs) {
+                                            chatsDirectos = listaTemp
+                                            isLoading = false
+                                        }
+                                    }
+                            } else {
+                                procesados++
+                                if (procesados == totalDocs) {
+                                    chatsDirectos = listaTemp
+                                    isLoading = false
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    isLoading = false
+                }
+            }
+
+        onDispose {
+            listenerSolicitudes.remove()
+            listenerDirectos.remove()
+        }
     }
 
     Column(
@@ -116,7 +241,14 @@ fun ProviderMessagesContainerScreen(
 
         val listaActual = if (selectedSubTab == 0) chatsSolicitudes else chatsDirectos
 
-        if (listaActual.isEmpty()) {
+        if (isLoading) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = Color(0xFFFF8F00))
+            }
+        } else if (listaActual.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -143,6 +275,23 @@ fun ProviderMessagesContainerScreen(
                 }
             }
         }
+    }
+}
+
+private fun formatearFecha(timestamp: Timestamp?): String {
+    if (timestamp == null) return ""
+    val fecha = timestamp.toDate()
+    val ahora = Calendar.getInstance()
+    val calFecha = Calendar.getInstance().apply { time = fecha }
+
+    return if (ahora.get(Calendar.YEAR) == calFecha.get(Calendar.YEAR) &&
+        ahora.get(Calendar.DAY_OF_YEAR) == calFecha.get(Calendar.DAY_OF_YEAR)) {
+        SimpleDateFormat("hh:mm a", Locale.getDefault()).format(fecha)
+    } else if (ahora.get(Calendar.YEAR) == calFecha.get(Calendar.YEAR) &&
+        ahora.get(Calendar.DAY_OF_YEAR) - calFecha.get(Calendar.DAY_OF_YEAR) == 1) {
+        "Ayer"
+    } else {
+        SimpleDateFormat("dd/MM/yy", Locale.getDefault()).format(fecha)
     }
 }
 

@@ -1,30 +1,42 @@
 package com.servixyabogota.ui.provider
 
 import android.net.Uri
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.firebase.Timestamp
+import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.storage.FirebaseStorage
-import com.servixyabogota.data.model.User
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
-
-import com.google.firebase.Timestamp
-import com.google.firebase.auth.EmailAuthProvider
-
-import androidx.lifecycle.viewModelScope
 import com.servixyabogota.data.model.Propuesta
 import com.servixyabogota.data.model.Solicitud
+import com.servixyabogota.data.model.User
 import com.servixyabogota.data.repository.SolicitudRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
+// Modelo UI para los chats directos recibidos por el prestador
+data class ProviderDirectChatUi(
+    val id: String = "",
+    val clienteId: String = "",
+    val clientName: String = "Cliente",
+    val clientPhoto: String = "",
+    val lastMessage: String = "",
+    val timeFormatted: String = "",
+    val fechaUltimoMensaje: Date? = null
+)
 
 data class EstadoProveedorUiState(
     val nombreCompleto: String = "",
@@ -56,8 +68,105 @@ class ProviderViewModel : ViewModel() {
 
     private val repository: SolicitudRepository = SolicitudRepository()
 
+    // ESTADO PARA CHATS DIRECTOS REALES
+    var listaChatsDirectos by mutableStateOf<List<ProviderDirectChatUi>>(emptyList())
+        private set
+    var estaCargandoChats by mutableStateOf(false)
+        private set
+
     init {
         cargarPerfil()
+        escucharChatsDirectos()
+    }
+
+    /**
+     * Escucha en tiempo real la colección "chats" en Firestore para el Prestador autenticado
+     */
+    fun escucharChatsDirectos() {
+        val uid = auth.currentUser?.uid ?: return
+        estaCargandoChats = true
+
+        db.collection("chats")
+            .whereEqualTo("prestadorId", uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    estaCargandoChats = false
+                    return@addSnapshotListener
+                }
+
+                if (snapshot != null) {
+                    val docs = snapshot.documents
+                    if (docs.isEmpty()) {
+                        listaChatsDirectos = emptyList()
+                        estaCargandoChats = false
+                        return@addSnapshotListener
+                    }
+
+                    val chatsTemp = mutableListOf<ProviderDirectChatUi>()
+                    var procesados = 0
+
+                    for (doc in docs) {
+                        val chatId = doc.id
+                        val clienteId = doc.getString("clienteId") ?: ""
+                        val ultimoMensaje = doc.getString("ultimoMensaje") ?: "Conversación iniciada"
+                        val timestamp = doc.getTimestamp("fechaUltimoMensaje")
+                        val fecha = timestamp?.toDate()
+
+                        val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
+                        val horaFormateada = if (fecha != null) sdf.format(fecha) else ""
+
+                        if (clienteId.isNotBlank()) {
+                            db.collection("usuarios").document(clienteId).get()
+                                .addOnSuccessListener { clientDoc ->
+                                    val nombreDoc = clientDoc.getString("nombreCompleto")
+                                    val primerNombre = clientDoc.getString("nombre") ?: ""
+                                    val apellido = clientDoc.getString("apellido") ?: ""
+
+                                    val nombreFinal = when {
+                                        !nombreDoc.isNullOrBlank() -> nombreDoc
+                                        primerNombre.isNotBlank() -> "$primerNombre $apellido".trim()
+                                        else -> "Cliente ServixYa"
+                                    }
+
+                                    val fotoFinal = clientDoc.getString("fotoUrl")
+                                        ?: clientDoc.getString("photoUrl")
+                                        ?: ""
+
+                                    chatsTemp.add(
+                                        ProviderDirectChatUi(
+                                            id = chatId,
+                                            clienteId = clienteId,
+                                            clientName = nombreFinal,
+                                            clientPhoto = fotoFinal,
+                                            lastMessage = ultimoMensaje,
+                                            timeFormatted = horaFormateada,
+                                            fechaUltimoMensaje = fecha
+                                        )
+                                    )
+
+                                    procesados++
+                                    if (procesados == docs.size) {
+                                        listaChatsDirectos = chatsTemp.sortedByDescending { it.fechaUltimoMensaje }
+                                        estaCargandoChats = false
+                                    }
+                                }
+                                .addOnFailureListener {
+                                    procesados++
+                                    if (procesados == docs.size) {
+                                        listaChatsDirectos = chatsTemp.sortedByDescending { it.fechaUltimoMensaje }
+                                        estaCargandoChats = false
+                                    }
+                                }
+                        } else {
+                            procesados++
+                            if (procesados == docs.size) {
+                                listaChatsDirectos = chatsTemp.sortedByDescending { it.fechaUltimoMensaje }
+                                estaCargandoChats = false
+                            }
+                        }
+                    }
+                }
+            }
     }
 
     fun cargarPerfil() {
@@ -262,21 +371,17 @@ class ProviderViewModel : ViewModel() {
             return
         }
 
-        // 1. Crear credencial con el correo actual y la contraseña ingresada
         val credential = EmailAuthProvider.getCredential(email, contrasenaActual)
 
-        // 2. Reautenticar al usuario
         user.reauthenticate(credential).addOnCompleteListener { reauthTask ->
             if (reauthTask.isSuccessful) {
-                // 3. Si la clave actual es correcta, actualizar en Firebase Auth
                 user.updatePassword(nuevaContrasena).addOnCompleteListener { updateTask ->
                     if (updateTask.isSuccessful) {
-                        // 4. Opcional: Actualizar registro de auditoría en Firestore
                         val db = FirebaseFirestore.getInstance()
                         db.collection("usuarios").document(user.uid)
                             .update("ultimaActualizacionPassword", Timestamp.now())
                             .addOnSuccessListener { onSuccess() }
-                            .addOnFailureListener { onSuccess() } // Se completa con éxito aunque el log falle
+                            .addOnFailureListener { onSuccess() }
                     } else {
                         onError(updateTask.exception?.localizedMessage ?: "Error al actualizar la contraseña.")
                     }
@@ -286,8 +391,6 @@ class ProviderViewModel : ViewModel() {
             }
         }
     }
-
-    // Dentro de ProviderViewModel class:
 
     fun actualizarPreferenciasNotificaciones(
         notificacionesPushChat: Boolean,
@@ -311,7 +414,6 @@ class ProviderViewModel : ViewModel() {
             }
     }
 
-    // Obtener solicitudes disponibles que coincidan con las categorías y localidades del prestador
     fun getSolicitudesDisponibles(
         misCategorias: List<String>,
         misLocalidades: List<String>
@@ -320,7 +422,6 @@ class ProviderViewModel : ViewModel() {
             .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     }
 
-    // Responder / Cotizar una solicitud
     fun enviarCotizacion(
         solicitudId: String,
         prestadorId: String,
@@ -341,4 +442,3 @@ class ProviderViewModel : ViewModel() {
         }
     }
 }
-
