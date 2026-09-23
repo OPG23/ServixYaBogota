@@ -37,12 +37,113 @@ class ClientViewModel : ViewModel() {
     var estaCargando by mutableStateOf(false)
     var estaGuardando by mutableStateOf(false)
 
+    // ESTADOS PARA PRESTADORES REALES
+    var listaPrestadores by mutableStateOf<List<ClientProviderModel>>(emptyList())
+    var estaCargandoPrestadores by mutableStateOf(false)
+
     init {
         cargarPerfilCliente()
+        cargarPrestadores()
     }
 
     /**
-     * Carga la información del usuario concatenando Nombre y Apellido si existen
+     * Escucha en tiempo real los perfiles de prestadores registrados en Firestore
+     */
+    fun cargarPrestadores() {
+        estaCargandoPrestadores = true
+
+        db.collection("usuarios")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    estaCargandoPrestadores = false
+                    return@addSnapshotListener
+                }
+
+                if (snapshot != null) {
+                    val prestadores = snapshot.documents.mapNotNull { doc ->
+                        val rol = doc.getString("rol") ?: doc.getString("tipoUsuario") ?: ""
+
+                        @Suppress("UNCHECKED_CAST")
+                        val categoriasList = (doc.get("categorias") as? List<String>)
+                            ?: (doc.get("especialidades") as? List<String>)
+                            ?: emptyList()
+
+                        // Es prestador si tiene rol de prestador o si ya definió sus categorías
+                        val esPrestador = rol.equals("PRESTADOR", ignoreCase = true) ||
+                                rol.equals("prestador", ignoreCase = true) ||
+                                categoriasList.isNotEmpty()
+
+                        // VALIDACIÓN ESTRICTA DE VERIFICACIÓN
+                        val estadoVerificacion = doc.getString("estadoVerificacion")
+                            ?: doc.getString("estado_verificacion")
+                            ?: ""
+                        val estaAprobado = estadoVerificacion.equals("APROBADO", ignoreCase = true)
+
+                        // Si no es prestador O no está APROBADO, se descarta inmediatamente
+                        if (!esPrestador || !estaAprobado) return@mapNotNull null
+
+                        val nombreCompletoDoc = doc.getString("nombreCompleto")
+                        val primerNombre = doc.getString("nombre") ?: doc.getString("primerNombre") ?: ""
+                        val apellido = doc.getString("apellido") ?: doc.getString("apellidos") ?: ""
+                        val nameAttr = doc.getString("name") ?: ""
+
+                        val nombreFinal = when {
+                            !nombreCompletoDoc.isNullOrBlank() -> nombreCompletoDoc
+                            primerNombre.isNotBlank() && apellido.isNotBlank() -> "$primerNombre $apellido"
+                            primerNombre.isNotBlank() -> primerNombre
+                            nameAttr.isNotBlank() -> nameAttr
+                            else -> "Prestador ServixYa"
+                        }
+
+                        val foto = doc.getString("fotoUrl") ?: doc.getString("photoUrl") ?: ""
+                        val calificacion = doc.getDouble("calificacion")
+                            ?: doc.getDouble("promedioCalificacion")
+                            ?: doc.getDouble("rating")
+                            ?: 5.0
+                        val totalResenas = doc.getLong("totalResenas")?.toInt()
+                            ?: doc.getLong("numeroResenas")?.toInt()
+                            ?: 0
+
+                        val disponibleHoy = doc.getBoolean("disponibleHoy") ?: doc.getBoolean("disponible") ?: true
+                        val descripcion = doc.getString("descripcion") ?: doc.getString("biografia") ?: ""
+                        val experienciaAnos = doc.getLong("experienciaAnos")?.toInt()
+                            ?: doc.getLong("experiencia")?.toInt()
+                            ?: 1
+
+                        @Suppress("UNCHECKED_CAST")
+                        val portafolioUrls = (doc.get("portafolioUrls") as? List<String>)
+                            ?: (doc.get("portafolio") as? List<String>)
+                            ?: emptyList()
+
+                        @Suppress("UNCHECKED_CAST")
+                        val localidades = (doc.get("localidades") as? List<String>)
+                            ?: (doc.get("localidadesAtencion") as? List<String>)
+                            ?: emptyList()
+
+                        ClientProviderModel(
+                            id = doc.id,
+                            nombre = nombreFinal,
+                            fotoUrl = foto,
+                            calificacion = calificacion,
+                            totalResenas = totalResenas,
+                            categorias = categoriasList,
+                            disponibleHoy = disponibleHoy,
+                            verificado = true, // Al estar APROBADO, garantizamos que sea verificado
+                            descripcion = descripcion,
+                            experienciaAnos = experienciaAnos,
+                            portafolioUrls = portafolioUrls,
+                            localidades = localidades
+                        )
+                    }
+
+                    listaPrestadores = prestadores
+                    estaCargandoPrestadores = false
+                }
+            }
+    }
+
+    /**
+     * Carga la información del usuario cliente
      */
     fun cargarPerfilCliente() {
         val user = auth.currentUser ?: return
@@ -82,9 +183,6 @@ class ClientViewModel : ViewModel() {
             }
     }
 
-    /**
-     * Guarda el nombre completo e incrementa la compatibilidad con campos nombre / apellido
-     */
     fun guardarCambiosPerfil(
         nuevoNombre: String,
         nuevoTelefono: String,
@@ -125,9 +223,6 @@ class ClientViewModel : ViewModel() {
             }
     }
 
-    /**
-     * Publica la solicitud tomando de forma segura clienteId, clienteNombre y clienteFotoUrl
-     */
     fun publicarSolicitud(
         categoria: String,
         detalle: String,
@@ -169,9 +264,6 @@ class ClientViewModel : ViewModel() {
         }
     }
 
-    /**
-     * Actualiza la solicitud sincronizando también nombre, foto y context
-     */
     fun actualizarSolicitud(
         solicitudId: String,
         categoria: String,
@@ -180,7 +272,7 @@ class ClientViewModel : ViewModel() {
         direccion: String,
         localidad: String,
         archivos: List<Uri>,
-        context: Context, // <-- AÑADIDO PARÁMETRO CONTEXT
+        context: Context,
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
@@ -207,7 +299,7 @@ class ClientViewModel : ViewModel() {
                         "clienteFotoUrl" to fotoFinal
                     ),
                     archivosUris = archivos,
-                    context = context // <-- PASADO AL REPOSITORIO
+                    context = context
                 )
 
                 if (result.isSuccess) {
@@ -221,7 +313,6 @@ class ClientViewModel : ViewModel() {
         }
     }
 
-    // Obtener "Mis Solicitudes"
     fun getMisSolicitudes(clienteId: String): StateFlow<List<Solicitud>> {
         return repository.obtenerMisSolicitudesCliente(clienteId)
             .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())

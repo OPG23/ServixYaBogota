@@ -1,11 +1,16 @@
 package com.servixyabogota.ui.client
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material3.*
@@ -21,7 +26,8 @@ import androidx.compose.ui.unit.sp
 fun ClientProposalsScreen(
     onNavigateTab: (String) -> Unit = {},
     onVerPropuestasClick: (String) -> Unit = {},
-    onVerChatClick: (String) -> Unit = {}
+    onVerChatClick: (String) -> Unit = {},
+    onVerChatsDirectosClick: () -> Unit = {} // <-- Callback para abrir la lista de chats directos
 ) {
     Scaffold(
         containerColor = Color(0xFFF8FAFC),
@@ -43,17 +49,86 @@ fun ClientProposalsScreen(
         ) {
             // TÍTULO
             Text(
-                text = "Propuestas",
+                text = "Propuestas y Chats",
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFF0F172A)
+            )
+
+            // =========================================================
+            // SECCIÓN NUEVA: BANTÓN / TARJETA DE CHATS DIRECTOS
+            // =========================================================
+            Surface(
+                color = Color(0xFFEFF6FF), // Fondo azul claro suave
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onVerChatsDirectosClick() }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Ícono circular de chats directos
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .background(Color(0xFF2563EB), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Chat,
+                                contentDescription = "Chats Directos",
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+
+                        Column {
+                            Text(
+                                text = "Chats Directos",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Text(
+                                text = "Conversaciones iniciadas desde perfiles",
+                                fontSize = 12.sp,
+                                color = Color(0xFF64748B)
+                            )
+                        }
+                    }
+
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                        contentDescription = "Ir a chats directos",
+                        tint = Color(0xFF2563EB),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            // TÍTULO DE PROPUESTAS EN CURSO
+            Text(
+                text = "Solicitudes en curso",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF475569)
             )
 
             // TARJETA 1: ABIERTA
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(16.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -167,7 +242,7 @@ fun ClientProposalsScreen(
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(16.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(

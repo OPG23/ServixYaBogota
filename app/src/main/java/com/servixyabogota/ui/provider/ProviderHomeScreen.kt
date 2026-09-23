@@ -1,6 +1,5 @@
 package com.servixyabogota.ui.provider
 
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -10,30 +9,23 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assignment
-import androidx.compose.material.icons.filled.BusinessCenter
 import androidx.compose.material.icons.filled.CloudUpload
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.servixyabogota.data.model.Solicitud
-import com.servixyabogota.ui.client.ProviderSecuritySettingsScreen
 import java.util.Date
 
-// Mapeo auxiliar de emojis para mostrar según la categoría de la solicitud
 private val mapaEmojisCategorias = mapOf(
     "Plomería" to "🪠",
     "Electricidad" to "⚡",
@@ -64,293 +56,14 @@ private fun formatearTiempoHace(fecha: Date?): String {
     }
 }
 
-@Composable
-fun ProviderHomeScreen(
-    viewModel: ProviderViewModel,
-    onIrACorregirDocumentos: () -> Unit = {},
-    onLogout: () -> Unit = {}
-) {
-    val context = LocalContext.current
-    val uiState by viewModel.uiState.observeAsState(EstadoProveedorUiState())
-    var mostrarModalRechazo by remember(uiState.estadoVerificacion) {
-        mutableStateOf(uiState.estadoVerificacion == "RECHAZADO")
-    }
-
-    var selectedTab by remember { mutableIntStateOf(0) }
-    var subPantallaPerfil by remember { mutableStateOf("PERFIL") }
-
-    if (uiState.estadoVerificacion == "RECHAZADO" && mostrarModalRechazo) {
-        AlertDialog(
-            onDismissRequest = { },
-            shape = RoundedCornerShape(16.dp),
-            containerColor = Color.White,
-            icon = {
-                Icon(
-                    imageVector = Icons.Default.Warning,
-                    contentDescription = null,
-                    tint = Color(0xFFD32F2F),
-                    modifier = Modifier.size(40.dp)
-                )
-            },
-            title = {
-                Text(
-                    text = "Observaciones en tu Verificación",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = Color(0xFFD32F2F)
-                )
-            },
-            text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "Hola, ${uiState.nombreCompleto}. Se requieren correcciones:",
-                        fontSize = 13.sp,
-                        color = Color.DarkGray
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Surface(
-                        color = Color(0xFFFFEBEE),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = "Motivo: ${uiState.motivoRechazo}",
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFFC62828),
-                                fontSize = 13.sp
-                            )
-                            if (uiState.justificacionRechazo.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = uiState.justificacionRechazo,
-                                    fontSize = 12.sp,
-                                    color = Color(0xFFB71C1C)
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        mostrarModalRechazo = false
-                        onIrACorregirDocumentos()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2)),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("Corregir Documentos", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { mostrarModalRechazo = false }) {
-                    Text("Cerrar", color = Color.Gray)
-                }
-            }
-        )
-    }
-
-    if (uiState.estadoVerificacion == "APROBADO") {
-        Scaffold(
-            bottomBar = {
-                NavigationBar(
-                    containerColor = Color.White,
-                    tonalElevation = 8.dp
-                ) {
-                    NavigationBarItem(
-                        selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
-                        icon = { Icon(Icons.Default.BusinessCenter, contentDescription = "Trabajos") },
-                        label = { Text("Trabajos", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Color(0xFFFF8F00),
-                            selectedTextColor = Color(0xFFFF8F00),
-                            indicatorColor = Color(0xFFFFF3E0),
-                            unselectedIconColor = Color.Gray,
-                            unselectedTextColor = Color.Gray
-                        )
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
-                        icon = { Icon(Icons.Default.History, contentDescription = "Historial") },
-                        label = { Text("Historial", fontSize = 11.sp) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Color(0xFFFF8F00),
-                            selectedTextColor = Color(0xFFFF8F00),
-                            indicatorColor = Color(0xFFFFF3E0),
-                            unselectedIconColor = Color.Gray,
-                            unselectedTextColor = Color.Gray
-                        )
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == 2,
-                        onClick = { selectedTab = 2 },
-                        icon = { Icon(Icons.Default.Person, contentDescription = "Mi Perfil") },
-                        label = { Text("Mi Perfil", fontSize = 11.sp) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Color(0xFFFF8F00),
-                            selectedTextColor = Color(0xFFFF8F00),
-                            indicatorColor = Color(0xFFFFF3E0),
-                            unselectedIconColor = Color.Gray,
-                            unselectedTextColor = Color.Gray
-                        )
-                    )
-                }
-            }
-        ) { paddingValues ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-            ) {
-                when (selectedTab) {
-                    0 -> OportunidadesScreen(viewModel = viewModel, uiState = uiState)
-                    1 -> HistorialTrabajosScreen()
-                    2 -> {
-                        when (subPantallaPerfil) {
-                            "PERFIL" -> {
-                                PerfilProfesionalScreen(
-                                    nombre = uiState.nombreCompleto,
-                                    fotoUrl = uiState.fotoUrl,
-                                    telefonoInicial = uiState.telefono,
-                                    correoInicial = uiState.correo,
-                                    esVerificado = true,
-                                    onIrAZonaCobertura = { subPantallaPerfil = "PORTAFOLIO" },
-                                    onIrASeguridad = { subPantallaPerfil = "SEGURIDAD" },
-                                    onIrAResenas = { subPantallaPerfil = "RESENAS" },
-                                    onGuardarCambios = { nuevoTelefono, nuevoCorreo ->
-                                        viewModel.actualizarContactoPerfil(
-                                            telefono = nuevoTelefono,
-                                            correo = nuevoCorreo,
-                                            onSuccess = {
-                                                Toast.makeText(context, "Perfil guardado con éxito", Toast.LENGTH_SHORT).show()
-                                            },
-                                            onError = { error ->
-                                                Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
-                                            }
-                                        )
-                                    },
-                                    onLogout = onLogout
-                                )
-                            }
-                            "PORTAFOLIO" -> {
-                                ZonaCoberturaPortafolioContainer(
-                                    viewModel = viewModel,
-                                    onVolver = { subPantallaPerfil = "PERFIL" }
-                                )
-                            }
-                            "SEGURIDAD" -> {
-                                ProviderSecuritySettingsScreen(
-                                    viewModel = viewModel,
-                                    onBack = { subPantallaPerfil = "PERFIL" }
-                                )
-                            }
-                            "RESENAS" -> {
-                                ProviderReviewsScreen(
-                                    onBack = { subPantallaPerfil = "PERFIL" }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFFF8F9FA))
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Hola, ${uiState.nombreCompleto.ifBlank { "Prestador" }}",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 22.sp
-                )
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                when (uiState.estadoVerificacion) {
-                    "NO_ENVIADO" -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        StatusCard(
-                            icon = Icons.Default.CloudUpload,
-                            iconColor = Color(0xFF1976D2),
-                            bgColor = Color(0xFFE3F2FD),
-                            title = "Documentación Pendiente",
-                            subtitle = "Sube tus documentos para activar tu cuenta.",
-                            onClick = onIrACorregirDocumentos
-                        )
-                        Spacer(modifier = Modifier.height(20.dp))
-                        Button(
-                            onClick = onIrACorregirDocumentos,
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2)),
-                            modifier = Modifier.fillMaxWidth().height(48.dp)
-                        ) {
-                            Text("Cargar Documentos", fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    "PENDIENTE_VERIFICACION" -> StatusCard(
-                        icon = Icons.Default.HourglassTop,
-                        iconColor = Color(0xFFFF9800),
-                        bgColor = Color(0xFFFFF3E0),
-                        title = "Verificación en Proceso",
-                        subtitle = "Tus documentos están en revisión. Te avisaremos pronto."
-                    )
-
-                    "RECHAZADO" -> StatusCard(
-                        icon = Icons.Default.Warning,
-                        iconColor = Color(0xFFD32F2F),
-                        bgColor = Color(0xFFFFEBEE),
-                        title = "Solicitud Rechazada",
-                        subtitle = "Toca aquí para revisar las observaciones y volver a enviar.",
-                        onClick = onIrACorregirDocumentos
-                    )
-                }
-            }
-
-            OutlinedButton(
-                onClick = onLogout,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth().height(48.dp)
-            ) {
-                Text("Cerrar Sesión", color = Color.Gray)
-            }
-        }
-    }
-}
-
-// PANTALLA DE OPORTUNIDADES
+// PANTALLA DE OPORTUNIDADES/TRABAJOS
 @Composable
 fun OportunidadesScreen(
     viewModel: ProviderViewModel,
-    uiState: EstadoProveedorUiState
+    uiState: EstadoProveedorUiState,
+    onSeleccionarSolicitud: (Solicitud) -> Unit
 ) {
-    val context = LocalContext.current
     var filtroSeleccionado by remember { mutableStateOf("Todas") }
-    var solicitudSeleccionada by remember { mutableStateOf<Solicitud?>(null) }
-
-    solicitudSeleccionada?.let { solicitud ->
-        DetalleSolicitudScreen(
-            solicitud = solicitud,
-            onBack = { solicitudSeleccionada = null },
-            onConfirmarPostulacion = { propuesta ->
-                Toast.makeText(context, "Postulación enviada correctamente", Toast.LENGTH_SHORT).show()
-                solicitudSeleccionada = null
-            }
-        )
-        return
-    }
 
     val categoriasPrestador = remember(uiState.categorias) {
         uiState.categorias.map { it.replace(Regex("[^a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]"), "").trim() }
@@ -513,9 +226,7 @@ fun OportunidadesScreen(
                 ) { solicitud ->
                     OportunidadCard(
                         solicitud = solicitud,
-                        onPostularme = {
-                            solicitudSeleccionada = solicitud
-                        }
+                        onPostularme = { onSeleccionarSolicitud(solicitud) }
                     )
                 }
             }
@@ -652,6 +363,83 @@ private fun OportunidadCard(
                     )
                 }
             }
+        }
+    }
+}
+
+// VISTA SI EL PRESTADOR AÚN NO ESTÁ APROBADO
+@Composable
+fun ProviderNonApprovedScreen(
+    uiState: EstadoProveedorUiState,
+    onIrACorregirDocumentos: () -> Unit,
+    onLogout: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF8F9FA))
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Hola, ${uiState.nombreCompleto.ifBlank { "Prestador" }}",
+                fontWeight = FontWeight.Bold,
+                fontSize = 22.sp
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            when (uiState.estadoVerificacion) {
+                "NO_ENVIADO" -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    StatusCard(
+                        icon = Icons.Default.CloudUpload,
+                        iconColor = Color(0xFF1976D2),
+                        bgColor = Color(0xFFE3F2FD),
+                        title = "Documentación Pendiente",
+                        subtitle = "Sube tus documentos para activar tu cuenta.",
+                        onClick = onIrACorregirDocumentos
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Button(
+                        onClick = onIrACorregirDocumentos,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2)),
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Text("Cargar Documentos", fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                "PENDIENTE_VERIFICACION" -> StatusCard(
+                    icon = Icons.Default.HourglassTop,
+                    iconColor = Color(0xFFFF9800),
+                    bgColor = Color(0xFFFFF3E0),
+                    title = "Verificación en Proceso",
+                    subtitle = "Tus documentos están en revisión. Te avisaremos pronto."
+                )
+
+                "RECHAZADO" -> StatusCard(
+                    icon = Icons.Default.Warning,
+                    iconColor = Color(0xFFD32F2F),
+                    bgColor = Color(0xFFFFEBEE),
+                    title = "Solicitud Rechazada",
+                    subtitle = "Toca aquí para revisar las observaciones y volver a enviar.",
+                    onClick = onIrACorregirDocumentos
+                )
+            }
+        }
+
+        OutlinedButton(
+            onClick = onLogout,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth().height(48.dp)
+        ) {
+            Text("Cerrar Sesión", color = Color.Gray)
         }
     }
 }

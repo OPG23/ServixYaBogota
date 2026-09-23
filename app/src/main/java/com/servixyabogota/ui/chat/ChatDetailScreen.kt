@@ -1,6 +1,5 @@
+package com.servixyabogota.ui.chat
 
-package com.servixyabogota.ui.client
-/*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,9 +14,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.outlined.AttachFile
-import androidx.compose.material.icons.outlined.Phone
-import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,57 +26,71 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
-
-data class ChatMessageItem(
-    val id: String,
-    val text: String,
-    val time: String,
-    val isFromMe: Boolean
-)
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 @Composable
-fun ClientChatScreen(
-    prestadorNombre: String = "Carlos Pérez",
-    solicitudInfo: String = "Solicitud #1024 - Plomería",
-    onBack: () -> Unit = {},
-    onConfirmarServicio: () -> Unit = {}
+fun ChatDetailScreen(
+    chatId: String,
+    currentUserId: String = "usuario_demo", // Pasa el ID del usuario actual aquí
+    esCliente: Boolean = true,
+    interlocutorNombre: String = "", // Nombre del receptor (Cliente o Prestador)
+    subtituloOnline: String = "En línea",
+    solicitudInfo: String? = null, // Si es nulo, oculta el banner superior
+    actionButtonText: String? = null, // Ej: "Confirmar Servicio" o "Enviar Cotización"
+    onActionButtonClick: (() -> Unit)? = null,
+    viewModel: ChatViewModel = viewModel(),
+    onBack: () -> Unit = {}
 ) {
     var messageText by remember { mutableStateOf("") }
 
-    val messages = remember {
-        mutableStateListOf(
-            ChatMessageItem("1", "Hola, vi tu solicitud sobre la fuga en el lavamanos. ¿Puedes enviarme una foto?", "10:30 AM", isFromMe = false),
-            ChatMessageItem("2", "Claro, aquí te mando. Lleva goteando 2 días.", "10:32 AM", isFromMe = true),
-            ChatMessageItem("3", "Perfecto, puedo ir hoy a las 3pm. ¿Te sirve?", "10:33 AM", isFromMe = false),
-            ChatMessageItem("4", "¡Sí, perfecto! Te espero.", "10:34 AM", isFromMe = true)
+    // 1. Inicialización en Firestore al abrir la pantalla
+    LaunchedEffect(chatId, currentUserId, esCliente) {
+        viewModel.inicializarChat(
+            solicitudId = chatId,
+            currentUserId = currentUserId,
+            esCliente = esCliente
         )
     }
 
+    // 2. Colectamos el estado en vivo desde el StateFlow del ViewModel
+    val uiState by viewModel.uiState.collectAsState()
+
+    // Nombre a mostrar en el header (usa el del parámetro o el de Firestore)
+    val nombreMostrar = interlocutorNombre.ifBlank { uiState.nombreContraparte.ifEmpty { "Usuario" } }
+
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+
+    // 3. Scroll automático al recibir/enviar un mensaje
+    LaunchedEffect(uiState.mensajes.size) {
+        if (uiState.mensajes.isNotEmpty()) {
+            listState.animateScrollToItem(uiState.mensajes.size - 1)
+        }
+    }
 
     Scaffold(
         containerColor = Color.White,
         topBar = {
             Column(modifier = Modifier.fillMaxWidth().statusBarsPadding()) {
-                // 1. TOP BAR DE CONTACTO
+                // TOP BAR
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Atrás",
-                        tint = Color(0xFF0F172A),
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clickable { onBack() }
-                    )
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Atrás",
+                            tint = Color(0xFF0F172A)
+                        )
+                    }
 
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
 
                     // Avatar con indicador En Línea
                     Box(contentAlignment = Alignment.BottomEnd) {
@@ -96,7 +109,7 @@ fun ClientChatScreen(
                             )
                         }
 
-                        // Punto verde "En Línea"
+                        // Punto verde
                         Box(
                             modifier = Modifier
                                 .size(12.dp)
@@ -110,21 +123,20 @@ fun ClientChatScreen(
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = prestadorNombre,
+                            text = nombreMostrar,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF0F172A)
                         )
                         Text(
-                            text = "En línea",
+                            text = subtituloOnline,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             color = Color(0xFF16A34A)
                         )
                     }
 
-                    // Botón de llamada
-                    IconButton(onClick = { /* Llamar */ }) {
+                    IconButton(onClick = { /* Lógica para llamadas */ }) {
                         Icon(
                             imageVector = Icons.Outlined.Phone,
                             contentDescription = "Llamar",
@@ -136,55 +148,60 @@ fun ClientChatScreen(
 
                 HorizontalDivider(color = Color(0xFFF1F5F9))
 
-                // 2. BANNER DE CONTEXTO DE SOLICITUD
-                Surface(
-                    color = Color(0xFFE0F2FE),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                // BANNER DE CONTEXTO DE SOLICITUD
+                if (!solicitudInfo.isNullOrEmpty()) {
+                    Surface(
+                        color = Color(0xFFE0F2FE),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Build,
-                                contentDescription = null,
-                                tint = Color(0xFF0284C7),
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(
-                                text = solicitudInfo,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A)
-                            )
-                        }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Build,
+                                    contentDescription = null,
+                                    tint = Color(0xFF0284C7),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = solicitudInfo,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A)
+                                )
+                            }
 
-                        Button(
-                            onClick = onConfirmarServicio,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF97316)),
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = "Confirmar Servicio",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
+                            if (!actionButtonText.isNullOrEmpty() && onActionButtonClick != null) {
+                                Button(
+                                    onClick = onActionButtonClick,
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF97316)),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = actionButtonText,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         },
         bottomBar = {
-            // 3. BARRA INFERIOR DE ENVÍO DE MENSAJE
+            // BARRA INFERIOR DE ENVÍO
             Surface(
                 color = Color.White,
                 tonalElevation = 8.dp,
@@ -200,8 +217,7 @@ fun ClientChatScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Botón Adjuntar
-                    IconButton(onClick = { /* Adjuntar archivo */ }) {
+                    IconButton(onClick = { /* Lógica para adjuntar */ }) {
                         Icon(
                             imageVector = Icons.Outlined.AttachFile,
                             contentDescription = "Adjuntar",
@@ -210,7 +226,6 @@ fun ClientChatScreen(
                         )
                     }
 
-                    // Campo de texto
                     OutlinedTextField(
                         value = messageText,
                         onValueChange = { messageText = it },
@@ -232,7 +247,6 @@ fun ClientChatScreen(
                         modifier = Modifier.weight(1f)
                     )
 
-                    // Botón Enviar Circular
                     Box(
                         modifier = Modifier
                             .size(44.dp)
@@ -240,19 +254,16 @@ fun ClientChatScreen(
                             .background(Color(0xFF2563EB))
                             .clickable {
                                 if (messageText.isNotBlank()) {
-                                    messages.add(
-                                        ChatMessageItem(
-                                            id = System
-                                                .currentTimeMillis()
-                                                .toString(),
-                                            text = messageText.trim(),
-                                            time = "10:35 AM",
-                                            isFromMe = true
-                                        )
-                                    )
+                                    val texto = messageText.trim()
                                     messageText = ""
+
+                                    // Enviar mensaje real a Firestore a través del ViewModel
+                                    viewModel.enviarMensaje(texto)
+
                                     coroutineScope.launch {
-                                        listState.animateScrollToItem(messages.size - 1)
+                                        if (uiState.mensajes.isNotEmpty()) {
+                                            listState.animateScrollToItem(uiState.mensajes.size - 1)
+                                        }
                                     }
                                 }
                             },
@@ -271,43 +282,72 @@ fun ClientChatScreen(
             }
         }
     ) { innerPadding ->
-        // 4. LISTA DE MENSAJES
-        LazyColumn(
-            state = listState,
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(vertical = 16.dp)
         ) {
-            items(messages) { msg ->
-                ChatBubble(message = msg)
+            if (uiState.isLoading && uiState.mensajes.isEmpty()) {
+                CircularProgressIndicator(
+                    modifier = Modifier.align(Alignment.Center),
+                    color = Color(0xFF2563EB)
+                )
+            } else if (uiState.mensajes.isEmpty()) {
+                Text(
+                    text = "No hay mensajes aún. ¡Inicia la conversación!",
+                    color = Color.Gray,
+                    fontSize = 14.sp,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    contentPadding = PaddingValues(vertical = 16.dp)
+                ) {
+                    items(uiState.mensajes, key = { it.id }) { msg ->
+                        ChatBubbleFirebase(
+                            mensaje = msg,
+                            isFromMe = msg.emisorId == currentUserId
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-fun ChatBubble(message: ChatMessageItem) {
+fun ChatBubbleFirebase(
+    mensaje: MensajeChat,
+    isFromMe: Boolean
+) {
+    val horaFormateada = remember(mensaje.fechaEnvio) {
+        val formatter = SimpleDateFormat("hh:mm a", Locale.getDefault())
+        formatter.format(mensaje.fechaEnvio)
+    }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = if (message.isFromMe) Alignment.End else Alignment.Start
+        horizontalAlignment = if (isFromMe) Alignment.End else Alignment.Start
     ) {
         Surface(
-            color = if (message.isFromMe) Color(0xFF2563EB) else Color(0xFFE2E8F0),
+            color = if (isFromMe) Color(0xFF2563EB) else Color(0xFFE2E8F0),
             shape = RoundedCornerShape(
                 topStart = 16.dp,
                 topEnd = 16.dp,
-                bottomStart = if (message.isFromMe) 16.dp else 4.dp,
-                bottomEnd = if (message.isFromMe) 4.dp else 16.dp
+                bottomStart = if (isFromMe) 16.dp else 4.dp,
+                bottomEnd = if (isFromMe) 4.dp else 16.dp
             ),
             modifier = Modifier.widthIn(max = 280.dp)
         ) {
             Text(
-                text = message.text,
+                text = mensaje.texto,
                 fontSize = 14.sp,
-                color = if (message.isFromMe) Color.White else Color(0xFF0F172A),
+                color = if (isFromMe) Color.White else Color(0xFF0F172A),
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                 lineHeight = 20.sp
             )
@@ -315,21 +355,20 @@ fun ChatBubble(message: ChatMessageItem) {
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // Hora y Double Check para mensajes propios
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
-                text = message.time,
+                text = horaFormateada,
                 fontSize = 11.sp,
                 color = Color(0xFF94A3B8)
             )
 
-            if (message.isFromMe) {
+            if (isFromMe) {
                 Icon(
                     imageVector = Icons.Filled.DoneAll,
-                    contentDescription = "Leído",
+                    contentDescription = "Enviado",
                     tint = Color(0xFF2563EB),
                     modifier = Modifier.size(16.dp)
                 )
@@ -337,4 +376,3 @@ fun ChatBubble(message: ChatMessageItem) {
         }
     }
 }
-*/
