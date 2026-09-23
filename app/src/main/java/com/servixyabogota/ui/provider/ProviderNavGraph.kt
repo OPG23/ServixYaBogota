@@ -23,9 +23,9 @@ fun ProviderNavGraph(
         navController = navController,
         startDestination = ProviderRoutes.HOME
     ) {
-        // Pantalla Principal: Administra estados APROBADO, PENDIENTE, RECHAZADO y NO_ENVIADO
+        // Pantalla Principal Contenedora: Administra pestañas (Trabajos, Mensajes, Historial, Perfil) y verificación
         composable(ProviderRoutes.HOME) {
-            ProviderHomeScreen(
+            ProviderMainContainer(
                 viewModel = providerViewModel,
                 onIrACorregirDocumentos = {
                     navController.navigate(ProviderRoutes.UPLOAD_DOCS)
@@ -57,6 +57,4 @@ fun ProviderNavGraph(
             )
         }
     }
-
 }
-

@@ -11,7 +11,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,82 +19,51 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
-
-// ==========================================
-// MODELOS DE DATOS MOCK
-// ==========================================
-
-data class CategoriaQuickFilter(
-    val id: String,
-    val nombre: String,
-    val icono: androidx.compose.ui.graphics.vector.ImageVector
-)
-
-data class PrestadorClienteModel(
-    val id: String,
-    val nombre: String,
-    val fotoUrl: String,
-    val calificacion: Double,
-    val totalResenas: Int,
-    val categorias: List<String>,
-    val disponibleHoy: Boolean = true,
-    val verificado: Boolean = true
-)
-
-// ==========================================
-// COMPOSABLE PRINCIPAL
-// ==========================================
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ClientHomeScreen(
-    onLogout: () -> Unit = {},
+    viewModel: ClientViewModel = viewModel(),
     onNavigateTab: (String) -> Unit = {},
-    onIniciarChat: (PrestadorClienteModel) -> Unit = {}
+    onIniciarChat: (ClientProviderModel) -> Unit = {},
+    onVerPerfilPrestador: (ClientProviderModel) -> Unit = {}
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    var categoriaSeleccionada by remember { mutableStateOf("Plomería") }
-    var selectedBottomTab by remember { mutableStateOf("Inicio") }
+    var categoriaSeleccionada by remember { mutableStateOf("") }
 
+    // Obtenemos los prestadores reales desde el ViewModel
+    val listaPrestadores = viewModel.listaPrestadores
+    val estaCargando = viewModel.estaCargandoPrestadores
+
+    // CATEGORÍAS CON EMOJIS
     val categoriasList = remember {
         listOf(
-            CategoriaQuickFilter("1", "Plomería", Icons.Default.Build),
-            CategoriaQuickFilter("2", "Electricidad", Icons.Default.ElectricBolt),
-            CategoriaQuickFilter("3", "Pintura", Icons.Default.FormatPaint),
-            CategoriaQuickFilter("4", "Aseo", Icons.Default.CleaningServices)
+            CategoriaItem("Plomería", "🪠"),
+            CategoriaItem("Electricidad", "⚡"),
+            CategoriaItem("Cerrajería", "🔑"),
+            CategoriaItem("Pintura", "🎨"),
+            CategoriaItem("Aseo y Limpieza", "🧹"),
+            CategoriaItem("Reparación de Electrodomésticos", "🔌"),
+            CategoriaItem("Carpintería", "🪚")
         )
     }
 
-    val listaPrestadores = remember {
-        listOf(
-            PrestadorClienteModel(
-                id = "1",
-                nombre = "Carlos Pérez",
-                fotoUrl = "https://i.pravatar.cc/150?img=11",
-                calificacion = 4.8,
-                totalResenas = 15,
-                categorias = listOf("Plomería", "Gas")
-            ),
-            PrestadorClienteModel(
-                id = "2",
-                nombre = "María López",
-                fotoUrl = "https://i.pravatar.cc/150?img=47",
-                calificacion = 4.9,
-                totalResenas = 32,
-                categorias = listOf("Electricidad")
-            ),
-            PrestadorClienteModel(
-                id = "3",
-                nombre = "Juan Rodríguez",
-                fotoUrl = "https://i.pravatar.cc/150?img=68",
-                calificacion = 4.6,
-                totalResenas = 8,
-                categorias = listOf("Pintura", "Aseo")
-            )
-        )
+    // FILTRADO DINÁMICO POR CATEGORÍA Y BÚSQUEDA
+    val prestadoresFiltrados = remember(listaPrestadores, categoriaSeleccionada, searchQuery) {
+        listaPrestadores.filter { prestador ->
+            val coincideCategoria = categoriaSeleccionada.isEmpty() ||
+                    prestador.categorias.any { cat -> cat.contains(categoriaSeleccionada, ignoreCase = true) }
+            val coincideBusqueda = searchQuery.isEmpty() ||
+                    prestador.nombre.contains(searchQuery, ignoreCase = true) ||
+                    prestador.categorias.any { cat -> cat.contains(searchQuery, ignoreCase = true) }
+
+            coincideCategoria && coincideBusqueda
+        }
     }
 
     Scaffold(
@@ -115,7 +83,7 @@ fun ClientHomeScreen(
             contentPadding = PaddingValues(vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. HEADER (Ubicación + Perfil)
+            // 1. HEADER (Ubicación + Perfil Cliente)
             item {
                 Row(
                     modifier = Modifier
@@ -135,7 +103,7 @@ fun ClientHomeScreen(
                             modifier = Modifier.size(24.dp)
                         )
                         Text(
-                            text = "Usaquén, Bogotá",
+                            text = viewModel.ciudad.ifBlank { "Bogotá, D.C." },
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF0F172A)
@@ -143,7 +111,7 @@ fun ClientHomeScreen(
                     }
 
                     AsyncImage(
-                        model = "https://i.pravatar.cc/150?img=32",
+                        model = viewModel.fotoUrl.ifBlank { "https://i.pravatar.cc/150?img=32" },
                         contentDescription = "Perfil Cliente",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
@@ -161,7 +129,7 @@ fun ClientHomeScreen(
                     onValueChange = { searchQuery = it },
                     placeholder = {
                         Text(
-                            "Buscar plomero, electricista...",
+                            "Buscar por nombre o servicio...",
                             color = Color(0xFF94A3B8),
                             fontSize = 14.sp
                         )
@@ -172,6 +140,13 @@ fun ClientHomeScreen(
                             contentDescription = null,
                             tint = Color(0xFF64748B)
                         )
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Limpiar", tint = Color(0xFF64748B))
+                            }
+                        }
                     },
                     singleLine = true,
                     shape = RoundedCornerShape(24.dp),
@@ -187,35 +162,32 @@ fun ClientHomeScreen(
                 )
             }
 
-            // 3. CHIPS CATEGORÍAS RÁPIDAS
+            // 3. BARRA DE CATEGORÍAS CON EMOJIS
             item {
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(categoriasList) { item ->
-                        val isSelected = item.nombre == categoriaSeleccionada
+                    items(categoriasList) { cat ->
+                        val isSelected = cat.nombre.equals(categoriaSeleccionada, ignoreCase = true)
                         Surface(
-                            onClick = { categoriaSeleccionada = item.nombre },
+                            onClick = {
+                                categoriaSeleccionada = if (isSelected) "" else cat.nombre
+                            },
                             shape = RoundedCornerShape(20.dp),
                             color = if (isSelected) Color(0xFF2563EB) else Color.White,
                             border = if (isSelected) null else androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
                             modifier = Modifier.height(42.dp)
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 16.dp),
+                                modifier = Modifier.padding(horizontal = 14.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Icon(
-                                    imageVector = item.icono,
-                                    contentDescription = null,
-                                    tint = if (isSelected) Color.White else Color(0xFF475569),
-                                    modifier = Modifier.size(18.dp)
-                                )
+                                Text(text = cat.emoji, fontSize = 16.sp)
                                 Text(
-                                    text = item.nombre,
-                                    fontSize = 14.sp,
+                                    text = cat.nombre,
+                                    fontSize = 13.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = if (isSelected) Color.White else Color(0xFF1E293B)
                                 )
@@ -225,64 +197,69 @@ fun ClientHomeScreen(
                 }
             }
 
-            // 4. BOTONES DE FILTRO Y ORDENAMIENTO
+            // 4. TÍTULO SECCIÓN Y RESULTADOS
             item {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Filtrar por Categoría
-                    OutlinedButton(
-                        onClick = { },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        modifier = Modifier.weight(1.1f)
-                    ) {
-                        Text(
-                            text = "Filtrar por Categoría",
-                            fontSize = 13.sp,
-                            color = Color(0xFF1E293B),
-                            fontWeight = FontWeight.Medium
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Icon(
-                            Icons.Default.KeyboardArrowDown,
-                            contentDescription = null,
-                            tint = Color(0xFF1E293B),
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    // Ordenar por estrellas
-                    OutlinedButton(
-                        onClick = { },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        modifier = Modifier.weight(0.9f)
-                    ) {
-                        Text(
-                            text = "★ Ordenar por estrellas",
-                            fontSize = 13.sp,
-                            color = Color(0xFF1E293B),
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
+                    Text(
+                        text = if (categoriaSeleccionada.isBlank()) "Todos los profesionales" else "Especialistas en $categoriaSeleccionada",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "${prestadoresFiltrados.size} disponibles",
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B)
+                    )
                 }
             }
 
-            // 5. LISTA DE PRESTADORES
-            items(listaPrestadores, key = { it.id }) { prestador ->
-                Box(modifier = Modifier.padding(horizontal = 20.dp)) {
-                    PrestadorCard(
-                        prestador = prestador,
-                        onIniciarChat = { onIniciarChat(prestador) }
-                    )
+            // 5. CARGANDO O LISTADO DE PRESTADORES
+            if (estaCargando) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 40.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = Color(0xFF2563EB))
+                    }
+                }
+            } else if (prestadoresFiltrados.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 40.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No se encontraron prestadores disponibles.",
+                            color = Color(0xFF64748B),
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            } else {
+                items(prestadoresFiltrados, key = { it.id }) { prestador ->
+                    Box(modifier = Modifier.padding(horizontal = 20.dp)) {
+                        ProviderCard(
+                            prestador = prestador,
+                            onClickCard = { onVerPerfilPrestador(prestador) },
+                            onIniciarChat = { onIniciarChat(prestador) }
+                        )
+                    }
                 }
             }
         }
@@ -290,12 +267,13 @@ fun ClientHomeScreen(
 }
 
 // ==========================================
-// TARJETA DE PRESTADOR
+// COMPOSABLE TARJETA DE PRESTADOR
 // ==========================================
 
 @Composable
-private fun PrestadorCard(
-    prestador: PrestadorClienteModel,
+private fun ProviderCard(
+    prestador: ClientProviderModel,
+    onClickCard: () -> Unit,
     onIniciarChat: () -> Unit
 ) {
     Card(
@@ -303,17 +281,19 @@ private fun PrestadorCard(
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1F5F9)),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClickCard() }
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 verticalAlignment = Alignment.Top,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // Foto de perfil con Badge de Verificado
+                // Foto de perfil + Badge Verificado
                 Box(modifier = Modifier.size(64.dp)) {
                     AsyncImage(
-                        model = prestador.fotoUrl,
+                        model = prestador.fotoUrl.ifBlank { "https://i.pravatar.cc/150?img=11" },
                         contentDescription = prestador.nombre,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
@@ -343,7 +323,7 @@ private fun PrestadorCard(
 
                 Spacer(modifier = Modifier.width(14.dp))
 
-                // Info del Prestador
+                // Información
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = prestador.nombre,
@@ -379,9 +359,9 @@ private fun PrestadorCard(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Chips de Categorías
+                    // Categorías
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        prestador.categorias.forEach { cat ->
+                        prestador.categorias.take(2).forEach { cat ->
                             Surface(
                                 color = Color(0xFFEFF6FF),
                                 shape = RoundedCornerShape(6.dp)
@@ -391,6 +371,8 @@ private fun PrestadorCard(
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF2563EB),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                 )
                             }
@@ -399,17 +381,16 @@ private fun PrestadorCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
             HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Fila Inferior: Estado Disponible + Botón Iniciar Chat
+            // Barra Inferior: Estado y Botón de Chat
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Badge "Disponible hoy"
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -418,17 +399,16 @@ private fun PrestadorCard(
                         modifier = Modifier
                             .size(8.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF16A34A))
+                            .background(if (prestador.disponibleHoy) Color(0xFF16A34A) else Color(0xFF94A3B8))
                     )
                     Text(
-                        text = "Disponible hoy",
+                        text = if (prestador.disponibleHoy) "Disponible hoy" else "No disponible hoy",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF15803D)
+                        color = if (prestador.disponibleHoy) Color(0xFF15803D) else Color(0xFF64748B)
                     )
                 }
 
-                // Botón Iniciar Chat
                 OutlinedButton(
                     onClick = onIniciarChat,
                     shape = RoundedCornerShape(10.dp),

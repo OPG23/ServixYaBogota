@@ -28,7 +28,7 @@ fun ClientBottomNavigation(
         val navItems = listOf(
             Triple("Inicio", Icons.Outlined.Home, Icons.Filled.Home),
             Triple("Solicitudes", Icons.Outlined.Assignment, Icons.Filled.Assignment),
-            Triple("Propuestas", Icons.Outlined.ChatBubbleOutline, Icons.Filled.ChatBubble),
+            Triple("Propuestas", Icons.Outlined.ChatBubbleOutline, Icons.Filled.ChatBubble), // o "Mensajes"
             Triple("Ajustes", Icons.Outlined.Settings, Icons.Filled.Settings)
         )
 

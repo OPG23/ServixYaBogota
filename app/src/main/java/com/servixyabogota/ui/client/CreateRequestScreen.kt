@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import coil.compose.rememberAsyncImagePainter
+import com.servixyabogota.data.model.Solicitud
 
 data class ItemMediaSolicitud(
     val id: String = java.util.UUID.randomUUID().toString(),
@@ -53,6 +54,7 @@ data class ItemMediaSolicitud(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateRequestScreen(
+    solicitudToEdit: Solicitud? = null,
     onBack: () -> Unit = {},
     onPublicarSolicitud: (
         categoria: String,
@@ -61,22 +63,77 @@ fun CreateRequestScreen(
         direccion: String,
         urgencia: String,
         archivos: List<Uri>
-    ) -> Unit = { _, _, _, _, _, _ -> }
+    ) -> Unit = { _, _, _, _, _, _ -> },
+    onGuardarEdicion: (
+        solicitudId: String,
+        categoria: String,
+        detalle: String,
+        localidad: String,
+        direccion: String,
+        urgencia: String,
+        archivos: List<Uri>
+    ) -> Unit = { _, _, _, _, _, _, _ -> }
 ) {
     val context = LocalContext.current
-    var categoriaSeleccionada by remember { mutableStateOf("") }
+    val esEdicion = solicitudToEdit != null
+
+    val categoriasDisponibles = listOf(
+        "🪠 Plomería",
+        "⚡ Electricidad",
+        "🔑 Cerrajería",
+        "🎨 Pintura",
+        "🧹 Aseo y Limpieza",
+        "🔌 Reparación de Electrodomésticos",
+        "🪚 Carpintería"
+    )
+
+    val localidadesBogota = listOf(
+        "Usaquén", "Chapinero", "Suba", "Teusaquillo", "Kennedy",
+        "Engativá", "Fontibón", "Bosa", "Barrios Unidos", "Puente Aranda",
+        "Los Mártires", "Santa Fe", "San Cristóbal", "Usme", "Tunjuelito",
+        "Antonio Nariño", "Candelaria", "Rafael Uribe Uribe", "Ciudad Bolívar"
+    )
+
+    var categoriaSeleccionada by remember(solicitudToEdit) {
+        mutableStateOf(
+            categoriasDisponibles.find { it.contains(solicitudToEdit?.categoria ?: "", ignoreCase = true) }
+                ?: solicitudToEdit?.categoria ?: ""
+        )
+    }
     var dropdownCategoriaExpanded by remember { mutableStateOf(false) }
 
-    var localidadSeleccionada by remember { mutableStateOf("") }
+    var localidadSeleccionada by remember(solicitudToEdit) {
+        mutableStateOf(solicitudToEdit?.localidad ?: "")
+    }
     var dropdownLocalidadExpanded by remember { mutableStateOf(false) }
 
-    var detalleProblema by remember { mutableStateOf("") }
-    var nivelUrgencia by remember { mutableStateOf("Media") }
-    var direccionBogota by remember { mutableStateOf("") }
+    var detalleProblema by remember(solicitudToEdit) {
+        mutableStateOf(solicitudToEdit?.detalleProblema ?: "")
+    }
+    var nivelUrgencia by remember(solicitudToEdit) {
+        mutableStateOf(if (solicitudToEdit?.nivelUrgencia.isNullOrBlank()) "Media" else solicitudToEdit!!.nivelUrgencia)
+    }
+    var direccionBogota by remember(solicitudToEdit) {
+        mutableStateOf(solicitudToEdit?.direccion ?: "")
+    }
 
-    var archivosAdjuntos by remember { mutableStateOf<List<ItemMediaSolicitud>>(emptyList()) }
+    var archivosAdjuntos by remember {
+        mutableStateOf<List<ItemMediaSolicitud>>(emptyList())
+    }
+
+    LaunchedEffect(solicitudToEdit) {
+        if (solicitudToEdit != null && solicitudToEdit.archivosUrls.isNotEmpty()) {
+            archivosAdjuntos = solicitudToEdit.archivosUrls.map { url ->
+                val uri = Uri.parse(url)
+                ItemMediaSolicitud(
+                    uri = uri,
+                    esVideo = esVideoUri(context, uri)
+                )
+            }
+        }
+    }
+
     var videoParaReproducir by remember { mutableStateOf<Uri?>(null) }
-
     val maxBytesPermitidos = 5 * 1024 * 1024L // 5 MB
 
     val launcherMedia = rememberLauncherForActivityResult(
@@ -93,7 +150,7 @@ fun CreateRequestScreen(
             if (pesoArchivo > maxBytesPermitidos) {
                 Toast.makeText(
                     context,
-                    "El archivo supera el límite de 5 MB. Por favor elige uno más liviano.",
+                    "El archivo supera el límite de 5 MB.",
                     Toast.LENGTH_LONG
                 ).show()
             } else {
@@ -106,37 +163,7 @@ fun CreateRequestScreen(
         }
     }
 
-    val categoriasDisponibles = listOf(
-        "🪠 Plomería",
-        "⚡ Electricidad",
-        "🔑 Cerrajería",
-        "🎨 Pintura",
-        "🧹 Aseo y Limpieza",
-        "🔌 Reparación de Electrodomésticos",
-        "🪚 Carpintería"
-    )
-
-    val localidadesBogota = listOf(
-        "Usaquén",
-        "Chapinero",
-        "Suba",
-        "Teusaquillo",
-        "Kennedy",
-        "Engativá",
-        "Fontibón",
-        "Bosa",
-        "Barrios Unidos",
-        "Puente Aranda",
-        "Los Mártires",
-        "Santa Fe",
-        "San Cristóbal",
-        "Usme",
-        "Tunjuelito",
-        "Antonio Nariño",
-        "Candelaria",
-        "Rafael Uribe Uribe",
-        "Ciudad Bolívar"
-    )
+    var estaEnviando by remember { mutableStateOf(false) }
 
     videoParaReproducir?.let { uri ->
         VideoPlayerDialog(
@@ -155,6 +182,7 @@ fun CreateRequestScreen(
             ) {
                 Box(modifier = Modifier.padding(16.dp)) {
                     Button(
+                        enabled = !estaEnviando,
                         onClick = {
                             if (categoriaSeleccionada.isEmpty()) {
                                 Toast.makeText(context, "Por favor selecciona una categoría", Toast.LENGTH_SHORT).show()
@@ -169,27 +197,53 @@ fun CreateRequestScreen(
                                 return@Button
                             }
 
-                            onPublicarSolicitud(
-                                categoriaSeleccionada,
-                                detalleProblema,
-                                localidadSeleccionada,
-                                direccionBogota,
-                                nivelUrgencia,
-                                archivosAdjuntos.map { it.uri }
-                            )
+                            estaEnviando = true
+                            val categoriaLimpia = categoriaSeleccionada.replace(Regex("^[^\b\\w]+"), "").trim()
+
+                            if (esEdicion && solicitudToEdit != null) {
+                                onGuardarEdicion(
+                                    solicitudToEdit.id,
+                                    categoriaLimpia,
+                                    detalleProblema,
+                                    localidadSeleccionada,
+                                    direccionBogota,
+                                    nivelUrgencia,
+                                    archivosAdjuntos.map { it.uri }
+                                )
+                            } else {
+                                onPublicarSolicitud(
+                                    categoriaLimpia,
+                                    detalleProblema,
+                                    localidadSeleccionada,
+                                    direccionBogota,
+                                    nivelUrgencia,
+                                    archivosAdjuntos.map { it.uri }
+                                )
+                            }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF2563EB),
+                            disabledContainerColor = Color(0xFF93C5FD)
+                        ),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp)
                     ) {
-                        Text(
-                            text = "Publicar Solicitud",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
+                        if (estaEnviando) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(
+                                text = if (esEdicion) "Guardar Cambios" else "Publicar Solicitud",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
                     }
                 }
             }
@@ -204,7 +258,7 @@ fun CreateRequestScreen(
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // 1. ENCABEZADO
+            // ENCABEZADO
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -229,14 +283,14 @@ fun CreateRequestScreen(
                 Spacer(modifier = Modifier.width(16.dp))
 
                 Text(
-                    text = "Nueva Solicitud Técnica",
+                    text = if (esEdicion) "Editar Solicitud Técnica" else "Nueva Solicitud Técnica",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF0F172A)
                 )
             }
 
-            // 2. CATEGORÍA DE SERVICIO
+            // CATEGORÍA DE SERVICIO
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = "Categoría de Servicio",
@@ -292,7 +346,7 @@ fun CreateRequestScreen(
                 }
             }
 
-            // 3. DETALLE DEL PROBLEMA
+            // DETALLE DEL PROBLEMA
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = "Detalle del problema",
@@ -326,7 +380,7 @@ fun CreateRequestScreen(
                 )
             }
 
-            // 4. FOTOS / VIDEOS (MÁX. 3)
+            // FOTOS / VIDEOS (MÁX. 3)
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     text = "FOTOS / VIDEOS DEL PROBLEMA (OPCIONAL)",
@@ -372,7 +426,7 @@ fun CreateRequestScreen(
                 }
             }
 
-            // 5. NIVEL DE URGENCIA
+            // NIVEL DE URGENCIA
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = "Nivel de Urgencia",
@@ -387,7 +441,7 @@ fun CreateRequestScreen(
                 ) {
                     UrgenciaOptionButton(
                         text = "Baja",
-                        isSelected = nivelUrgencia == "Baja",
+                        isSelected = nivelUrgencia.contains("Baja", ignoreCase = true),
                         selectedBorderColor = Color(0xFF94A3B8),
                         selectedTextColor = Color(0xFF475569),
                         selectedBgColor = Color.White,
@@ -397,7 +451,7 @@ fun CreateRequestScreen(
 
                     UrgenciaOptionButton(
                         text = "Media",
-                        isSelected = nivelUrgencia == "Media",
+                        isSelected = nivelUrgencia.contains("Media", ignoreCase = true),
                         selectedBorderColor = Color(0xFFF59E0B),
                         selectedTextColor = Color(0xFFD97706),
                         selectedBgColor = Color(0xFFFFFBEB),
@@ -407,7 +461,7 @@ fun CreateRequestScreen(
 
                     UrgenciaOptionButton(
                         text = "Urgente 🚨",
-                        isSelected = nivelUrgencia == "Urgente",
+                        isSelected = nivelUrgencia.contains("Urgente", ignoreCase = true),
                         selectedBorderColor = Color(0xFFEF4444),
                         selectedTextColor = Color(0xFFDC2626),
                         selectedBgColor = Color(0xFFFEF2F2),
@@ -417,7 +471,7 @@ fun CreateRequestScreen(
                 }
             }
 
-            // 6. UBICACIÓN EN BOGOTÁ (LOCALIDAD + DIRECCIÓN)
+            // UBICACIÓN EN BOGOTÁ
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     text = "Ubicación en Bogotá",
@@ -426,7 +480,6 @@ fun CreateRequestScreen(
                     color = Color(0xFF0F172A)
                 )
 
-                // Dropdown Localidad
                 ExposedDropdownMenuBox(
                     expanded = dropdownLocalidadExpanded,
                     onExpandedChange = { dropdownLocalidadExpanded = !dropdownLocalidadExpanded }
@@ -481,7 +534,6 @@ fun CreateRequestScreen(
                     }
                 }
 
-                // Campo Dirección Exacta
                 OutlinedTextField(
                     value = direccionBogota,
                     onValueChange = { direccionBogota = it },
@@ -527,29 +579,27 @@ private fun MediaSlotItem(
             contentAlignment = Alignment.Center
         ) {
             if (item != null) {
-                Image(
-                    painter = rememberAsyncImagePainter(item.uri),
-                    contentDescription = if (item.esVideo) "Video cargado" else "Foto cargada",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-
                 if (item.esVideo) {
                     Box(
                         modifier = Modifier
-                            .align(Alignment.Center)
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.6f)),
+                            .fillMaxSize()
+                            .background(Color(0xFF1E293B)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.PlayArrow,
                             contentDescription = "Reproducir Video",
                             tint = Color.White,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(32.dp)
                         )
                     }
+                } else {
+                    Image(
+                        painter = rememberAsyncImagePainter(model = item.uri),
+                        contentDescription = "Foto cargada",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
 
                 Box(
@@ -592,7 +642,7 @@ private fun MediaSlotItem(
         Spacer(modifier = Modifier.height(4.dp))
 
         Text(
-            text = if (item != null) (if (item.esVideo) "Video cargado" else "Foto cargada") else "Vacío",
+            text = if (item != null) (if (item.esVideo) "Video listo" else "Foto lista") else "Vacío",
             fontSize = 11.sp,
             color = Color(0xFF94A3B8),
             textAlign = TextAlign.Center,
@@ -715,6 +765,10 @@ private fun UrgenciaOptionButton(
 }
 
 private fun obtenerTamanoArchivoBytes(context: Context, uri: Uri): Long {
+    val uriStr = uri.toString()
+    if (uriStr.startsWith("http://") || uriStr.startsWith("https://")) {
+        return 0L
+    }
     return try {
         context.contentResolver.openFileDescriptor(uri, "r")?.use {
             it.statSize
@@ -724,12 +778,19 @@ private fun obtenerTamanoArchivoBytes(context: Context, uri: Uri): Long {
     }
 }
 
+// FUNCIÓN CORREGIDA PARA RECONOCER VIDEOS LOCALES Y REMOTOS
 private fun esVideoUri(context: Context, uri: Uri?): Boolean {
     if (uri == null) return false
     val uriStr = uri.toString().lowercase()
     if (uriStr.startsWith("http://") || uriStr.startsWith("https://")) {
-        return uriStr.contains(".mp4") || uriStr.contains(".mkv") || uriStr.contains(".3gp") || uriStr.contains(".webm") || uriStr.contains("video")
+        return uriStr.contains(".mp4") || uriStr.contains(".mov") ||
+                uriStr.contains(".mkv") || uriStr.contains(".webm") ||
+                uriStr.contains(".avi") || uriStr.contains("video")
     }
-    val mimeType = context.contentResolver.getType(uri)
-    return mimeType?.startsWith("video/") == true
+    return try {
+        val type = context.contentResolver.getType(uri)
+        type?.startsWith("video") == true
+    } catch (e: Exception) {
+        false
+    }
 }

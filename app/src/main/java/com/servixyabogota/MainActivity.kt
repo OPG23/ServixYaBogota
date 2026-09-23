@@ -5,23 +5,20 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import com.servixyabogota.ui.admin.AdminUsersScreen
 import com.servixyabogota.ui.admin.AdminVerificationScreen
 import com.servixyabogota.ui.admin.AdminViewModel
 import com.servixyabogota.ui.auth.AuthViewModel
 import com.servixyabogota.ui.auth.LoginScreen
 import com.servixyabogota.ui.auth.RegisterScreen
-import com.servixyabogota.ui.client.ClientHomeScreen
 import com.servixyabogota.ui.client.ClientMainContainer
 import com.servixyabogota.ui.onboarding.OnboardingScreen
 import com.servixyabogota.ui.provider.CargarDocumentosPrestadorScreen
-import com.servixyabogota.ui.provider.ProviderHomeScreen
+import com.servixyabogota.ui.provider.ProviderMainContainer
 import com.servixyabogota.ui.provider.ProviderViewModel
 import com.servixyabogota.ui.theme.ServixYaBogotaTheme
-
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.livedata.observeAsState
 
 class MainActivity : ComponentActivity() {
 
@@ -78,7 +75,7 @@ class MainActivity : ComponentActivity() {
                         AdminVerificationScreen(
                             viewModel = adminViewModel,
                             onLogout = { currentScreen = "login" },
-                            onNavigateToUsuarios = { currentScreen = "admin_users" } // Navegar a la pantalla de usuarios
+                            onNavigateToUsuarios = { currentScreen = "admin_users" }
                         )
                     }
 
@@ -86,8 +83,8 @@ class MainActivity : ComponentActivity() {
                     "admin_users" -> {
                         AdminUsersScreen(
                             onNavigateToHome = { currentScreen = "home_admin" },
-                            onVerDetalleUsuario = { usuario ->
-                                // Aquí podrás navegar al detalle del usuario cuando crees esa vista
+                            onVerDetalleUsuario = { _ ->
+                                // Detalle de usuario cuando crees esa vista
                             }
                         )
                     }
@@ -97,10 +94,10 @@ class MainActivity : ComponentActivity() {
                         LaunchedEffect(Unit) {
                             providerViewModel.cargarPerfil()
                         }
-                        ProviderHomeScreen(
+                        ProviderMainContainer(
                             viewModel = providerViewModel,
                             onIrACorregirDocumentos = {
-                                currentScreen = "cargar_documentos" // Navegación activada
+                                currentScreen = "cargar_documentos"
                             },
                             onLogout = { currentScreen = "login" }
                         )

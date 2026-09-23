@@ -349,7 +349,7 @@ fun RegisterScreen(
                 fontSize = 12.sp,
                 color = Color(0xFF1976D2),
                 textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
-                modifier = Modifier.clickable { mostrarTerminosDialog = true } // <-- ABRE EL DIÁLOGO
+                modifier = Modifier.clickable { mostrarTerminosDialog = true }
             )
         }
 
@@ -365,7 +365,7 @@ fun RegisterScreen(
             CircularProgressIndicator(color = Color(0xFF1976D2))
         } else {
             Button(
-                enabled = habeasData,
+                enabled = aceptoTerminos, // <-- CORREGIDO: ahora lee aceptoTerminos
                 onClick = {
                     val rol = if (esPrestador) "prestador" else "cliente"
                     viewModel.registrarUsuario(
@@ -376,7 +376,7 @@ fun RegisterScreen(
                         cedula = cedula,
                         tel = telefono,
                         rol = rol,
-                        habeasData = habeasData
+                        habeasData = aceptoTerminos // <-- CORREGIDO: pasa aceptoTerminos
                     )
                 },
                 shape = RoundedCornerShape(12.dp),
