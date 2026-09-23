@@ -9,10 +9,11 @@ import com.google.firebase.auth.FirebaseAuth
 import com.servixyabogota.ui.chat.ChatDetailScreen
 import com.servixyabogota.ui.chat.ChatViewModel
 
-// Modelo simple para manejar el estado del chat en el Cliente
 data class ChatClienteUi(
     val id: String,
     val nombrePrestador: String,
+    val fotoPrestadorUrl: String? = null,
+    val prestadorId: String? = null,
     val tituloSolicitud: String? = null
 )
 
@@ -42,18 +43,40 @@ fun ClientMainContainer(
 
     // 1. PANTALLA DE CHAT ACTIVO
     if (chatClienteActivo != null) {
+        val activeChat = chatClienteActivo!!
+
+        val pEncontrado = viewModel.listaPrestadores.find { prestador ->
+            (activeChat.prestadorId != null && prestador.id == activeChat.prestadorId) ||
+                    prestador.nombre.equals(activeChat.nombrePrestador.trim(), ignoreCase = true) ||
+                    prestador.nombre.contains(activeChat.nombrePrestador.trim(), ignoreCase = true)
+        }
+
         ChatDetailScreen(
-            chatId = chatClienteActivo!!.id,
+            chatId = activeChat.id,
             currentUserId = currentUserId,
             esCliente = true,
-            interlocutorNombre = chatClienteActivo!!.nombrePrestador,
-            solicitudInfo = chatClienteActivo!!.tituloSolicitud,
-            actionButtonText = if (chatClienteActivo!!.tituloSolicitud != null) "Confirmar Servicio" else null,
+            interlocutorNombre = activeChat.nombrePrestador,
+            interlocutorFotoUrl = activeChat.fotoPrestadorUrl ?: pEncontrado?.fotoUrl, // <-- SE USA fotoUrl
+            solicitudInfo = activeChat.tituloSolicitud,
+            actionButtonText = if (activeChat.tituloSolicitud != null) "Confirmar Servicio" else null,
             onActionButtonClick = {
                 Toast.makeText(context, "Procesando contratación del servicio...", Toast.LENGTH_SHORT).show()
             },
             viewModel = chatViewModel,
-            onBack = { chatClienteActivo = null }
+            onBack = { chatClienteActivo = null },
+            onVerPerfilPrestador = {
+                if (pEncontrado != null) {
+                    selectedProviderId = pEncontrado.id
+                    showDirectChats = false
+                    chatClienteActivo = null
+                } else {
+                    Toast.makeText(
+                        context,
+                        "No se encontró la información de ${activeChat.nombrePrestador}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
         )
     }
     // 2. VISTA DE CREAR SOLICITUD
@@ -80,39 +103,47 @@ fun ClientMainContainer(
             }
         )
     }
-    // 3. VISTA DE CHATS DIRECTOS
-    else if (showDirectChats) {
-        ClientDirectChatsScreen(
-            onBack = { showDirectChats = false },
-            onOpenChat = { chatId, providerName ->
-                chatClienteActivo = ChatClienteUi(
-                    id = chatId,
-                    nombrePrestador = providerName,
-                    tituloSolicitud = null
-                )
-            }
-        )
-    }
-    // 4. VISTA DE DETALLE DEL PERFIL DEL PRESTADOR
-    else if (selectedProviderId != null && selectedProvider != null) {
+    // 3. VISTA DE DETALLE DEL PERFIL DEL PRESTADOR
+    else if (selectedProvider != null) {
+        val provider = selectedProvider // Variable local para garantizar no-nulo dentro del lambda
+
         ProviderDetailProfileScreen(
-            prestador = selectedProvider,
+            prestador = provider,
             onBack = { selectedProviderId = null },
             onIniciarChat = {
-                // CREACIÓN/CONSULTA DE CHAT REAL EN FIRESTORE
                 viewModel.obtenerOCrearChatDirecto(
-                    prestadorId = selectedProvider.id,
+                    prestadorId = provider.id,
                     onSuccess = { chatIdReal ->
                         selectedProviderId = null
                         chatClienteActivo = ChatClienteUi(
                             id = chatIdReal,
-                            nombrePrestador = selectedProvider.nombre,
+                            nombrePrestador = provider.nombre,
+                            fotoPrestadorUrl = provider.fotoUrl, // <-- SE USA fotoUrl
+                            prestadorId = provider.id,
                             tituloSolicitud = null
                         )
                     },
                     onError = { error ->
                         Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
                     }
+                )
+            }
+        )
+    }
+    // 4. VISTA DE CHATS DIRECTOS
+    else if (showDirectChats) {
+        ClientDirectChatsScreen(
+            onBack = { showDirectChats = false },
+            onOpenChat = { chatId, providerName ->
+                val prestadorMatch = viewModel.listaPrestadores.find {
+                    it.nombre.equals(providerName.trim(), ignoreCase = true)
+                }
+                chatClienteActivo = ChatClienteUi(
+                    id = chatId,
+                    nombrePrestador = providerName,
+                    fotoPrestadorUrl = prestadorMatch?.fotoUrl, // <-- SE USA fotoUrl
+                    prestadorId = prestadorMatch?.id,
+                    tituloSolicitud = null
                 )
             }
         )
@@ -130,13 +161,14 @@ fun ClientMainContainer(
                         currentTab = selectedTab
                     },
                     onIniciarChat = { prestador ->
-                        // CREACIÓN/CONSULTA DE CHAT REAL EN FIRESTORE DESDE INICIO
                         viewModel.obtenerOCrearChatDirecto(
                             prestadorId = prestador.id,
                             onSuccess = { chatIdReal ->
                                 chatClienteActivo = ChatClienteUi(
                                     id = chatIdReal,
                                     nombrePrestador = prestador.nombre,
+                                    fotoPrestadorUrl = prestador.fotoUrl, // <-- SE USA fotoUrl
+                                    prestadorId = prestador.id,
                                     tituloSolicitud = null
                                 )
                             },

@@ -23,10 +23,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage // <-- IMPORTANTE: Librería Coil
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -37,16 +39,17 @@ fun ChatDetailScreen(
     currentUserId: String = "usuario_demo",
     esCliente: Boolean = true,
     interlocutorNombre: String = "",
+    interlocutorFotoUrl: String? = null, // <-- NUEVO PARÁMETRO
     subtituloOnline: String = "En línea",
     solicitudInfo: String? = null,
     actionButtonText: String? = null,
     onActionButtonClick: (() -> Unit)? = null,
     viewModel: ChatViewModel = viewModel(),
-    onBack: () -> Unit = {}
+    onBack: () -> Unit = {},
+    onVerPerfilPrestador: (() -> Unit)? = null
 ) {
     var messageText by remember { mutableStateOf("") }
 
-    // CORRECCIÓN: Se cambió 'solicitudId =' por 'chatId ='
     LaunchedEffect(chatId, currentUserId, esCliente) {
         viewModel.inicializarChat(
             chatId = chatId,
@@ -87,46 +90,68 @@ fun ChatDetailScreen(
 
                     Spacer(modifier = Modifier.width(4.dp))
 
-                    Box(contentAlignment = Alignment.BottomEnd) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFCBD5E1)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Person,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(enabled = esCliente && onVerPerfilPrestador != null) {
+                                onVerPerfilPrestador?.invoke()
+                            }
+                            .padding(vertical = 4.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(contentAlignment = Alignment.BottomEnd) {
+                            // CONTENEDOR DE LA FOTO DE PERFIL / AVATAR
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFCBD5E1)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!interlocutorFotoUrl.isNullOrEmpty()) {
+                                    AsyncImage(
+                                        model = interlocutorFotoUrl,
+                                        contentDescription = "Foto de perfil",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Person,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+
+                            // Indicador de estado en línea
+                            Box(
+                                modifier = Modifier
+                                    .size(12.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF22C55E))
+                                    .border(2.dp, Color.White, CircleShape)
                             )
                         }
 
-                        Box(
-                            modifier = Modifier
-                                .size(12.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF22C55E))
-                                .border(2.dp, Color.White, CircleShape)
-                        )
-                    }
+                        Spacer(modifier = Modifier.width(12.dp))
 
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = nombreMostrar,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
-                        )
-                        Text(
-                            text = subtituloOnline,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFF16A34A)
-                        )
+                        Column {
+                            Text(
+                                text = nombreMostrar,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                            Text(
+                                text = if (esCliente && onVerPerfilPrestador != null) "Ver perfil" else subtituloOnline,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (esCliente && onVerPerfilPrestador != null) Color(0xFF2563EB) else Color(0xFF16A34A)
+                            )
+                        }
                     }
 
                     IconButton(onClick = { /* Lógica para llamadas */ }) {
