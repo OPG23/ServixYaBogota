@@ -41,7 +41,7 @@ fun ClientMainContainer(
     var currentSettingsSubScreen by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedProposalRequestId by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // 1. PANTALLA DE CHAT ACTIVO
+    // 1. PANTALLA DE CHAT ACTIVO (Navegación al detalle del chat)
     if (chatClienteActivo != null) {
         val activeChat = chatClienteActivo!!
 
@@ -56,7 +56,7 @@ fun ClientMainContainer(
             currentUserId = currentUserId,
             esCliente = true,
             interlocutorNombre = activeChat.nombrePrestador,
-            interlocutorFotoUrl = activeChat.fotoPrestadorUrl ?: pEncontrado?.fotoUrl, // <-- SE USA fotoUrl
+            interlocutorFotoUrl = activeChat.fotoPrestadorUrl ?: pEncontrado?.fotoUrl,
             solicitudInfo = activeChat.tituloSolicitud,
             actionButtonText = if (activeChat.tituloSolicitud != null) "Confirmar Servicio" else null,
             onActionButtonClick = {
@@ -105,7 +105,7 @@ fun ClientMainContainer(
     }
     // 3. VISTA DE DETALLE DEL PERFIL DEL PRESTADOR
     else if (selectedProvider != null) {
-        val provider = selectedProvider // Variable local para garantizar no-nulo dentro del lambda
+        val provider = selectedProvider
 
         ProviderDetailProfileScreen(
             prestador = provider,
@@ -118,7 +118,7 @@ fun ClientMainContainer(
                         chatClienteActivo = ChatClienteUi(
                             id = chatIdReal,
                             nombrePrestador = provider.nombre,
-                            fotoPrestadorUrl = provider.fotoUrl, // <-- SE USA fotoUrl
+                            fotoPrestadorUrl = provider.fotoUrl,
                             prestadorId = provider.id,
                             tituloSolicitud = null
                         )
@@ -141,7 +141,7 @@ fun ClientMainContainer(
                 chatClienteActivo = ChatClienteUi(
                     id = chatId,
                     nombrePrestador = providerName,
-                    fotoPrestadorUrl = prestadorMatch?.fotoUrl, // <-- SE USA fotoUrl
+                    fotoPrestadorUrl = prestadorMatch?.fotoUrl,
                     prestadorId = prestadorMatch?.id,
                     tituloSolicitud = null
                 )
@@ -167,7 +167,7 @@ fun ClientMainContainer(
                                 chatClienteActivo = ChatClienteUi(
                                     id = chatIdReal,
                                     nombrePrestador = prestador.nombre,
-                                    fotoPrestadorUrl = prestador.fotoUrl, // <-- SE USA fotoUrl
+                                    fotoPrestadorUrl = prestador.fotoUrl,
                                     prestadorId = prestador.id,
                                     tituloSolicitud = null
                                 )
@@ -209,9 +209,11 @@ fun ClientMainContainer(
                         solicitudId = selectedProposalRequestId!!,
                         onBack = { selectedProposalRequestId = null },
                         onOpenChat = { solicitudId, prestadorId, nombrePrestador ->
+                            val prestadorMatch = viewModel.listaPrestadores.find { it.id == prestadorId }
                             chatClienteActivo = ChatClienteUi(
                                 id = solicitudId,
                                 nombrePrestador = nombrePrestador,
+                                fotoPrestadorUrl = prestadorMatch?.fotoUrl,
                                 prestadorId = prestadorId,
                                 tituloSolicitud = "Propuesta de Servicio"
                             )
@@ -219,7 +221,7 @@ fun ClientMainContainer(
                     )
                 } else {
                     ClientProposalsScreen(
-                        clientViewModel = viewModel, // <-- Se añade la referencia al ViewModel
+                        clientViewModel = viewModel,
                         onNavigateTab = { selectedTab ->
                             currentSettingsSubScreen = null
                             selectedProposalRequestId = null

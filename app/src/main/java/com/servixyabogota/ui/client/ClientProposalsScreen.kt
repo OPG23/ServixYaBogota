@@ -36,6 +36,14 @@ fun ClientProposalsScreen(
     val misSolicitudesState = remember(currentUserId) { clientViewModel.getMisSolicitudes(currentUserId) }
     val listaSolicitudes by misSolicitudesState.collectAsState()
 
+    // Filtro para incluir únicamente solicitudes en estado activo/pendiente/en proceso
+    val solicitudesActivas = remember(listaSolicitudes) {
+        listaSolicitudes.filter { solicitud ->
+            val estado = solicitud.estado.uppercase()
+            estado != "CANCELADA" && estado != "CANCELADO" && estado != "FINALIZADA"
+        }
+    }
+
     Scaffold(
         containerColor = Color(0xFFF8FAFC),
         bottomBar = {
@@ -125,7 +133,7 @@ fun ClientProposalsScreen(
                 color = Color(0xFF475569)
             )
 
-            if (listaSolicitudes.isEmpty()) {
+            if (solicitudesActivas.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -143,7 +151,7 @@ fun ClientProposalsScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(listaSolicitudes, key = { it.id }) { solicitud ->
+                    items(solicitudesActivas, key = { it.id }) { solicitud ->
                         TarjetaSolicitudCliente(
                             solicitud = solicitud,
                             onVerPropuestasClick = { onVerPropuestasClick(solicitud.id) },
