@@ -492,6 +492,7 @@ class ProviderViewModel : ViewModel() {
                     // 3. Incrementar contador de interesados en la solicitud
                     val solicitudRef = db.collection("solicitudes").document(solicitudId)
                     batch.update(solicitudRef, "numeroInteresados", FieldValue.increment(1))
+                    batch.update(solicitudRef, "cantidadPropuestas", FieldValue.increment(1))
 
                     // 4. Crear primer mensaje en el chat del servicio
                     val primerMensajeRef = solicitudRef.collection("mensajes").document()

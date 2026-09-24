@@ -239,8 +239,10 @@ private fun TarjetaSolicitudCliente(
                     )
                 }
 
+                // Muestra la cantidad acumulada actual
+                val conteoPropuestas = solicitud.cantidadPropuestas
                 Text(
-                    text = "${solicitud.cantidadPropuestas} Prestadores interesados",
+                    text = "$conteoPropuestas ${if (conteoPropuestas == 1) "Prestador interesado" else "Prestadores interesados"}",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     color = Color(0xFF2563EB)
