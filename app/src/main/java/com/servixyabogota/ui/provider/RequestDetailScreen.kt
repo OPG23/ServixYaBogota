@@ -1,6 +1,7 @@
 package com.servixyabogota.ui.provider
 
 import android.widget.MediaController
+import android.widget.Toast
 import android.widget.VideoView
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -23,7 +25,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -41,8 +45,10 @@ private fun esVideoUrl(url: String): Boolean {
 fun DetalleSolicitudScreen(
     solicitud: Solicitud,
     onBack: () -> Unit,
-    onConfirmarPostulacion: (propuesta: String) -> Unit
+    onConfirmarPostulacion: (monto: Double, propuesta: String) -> Unit
 ) {
+    val context = LocalContext.current
+    var montoTexto by remember { mutableStateOf("") }
     var propuestaTexto by remember { mutableStateOf("") }
     var videoParaReproducir by remember { mutableStateOf<String?>(null) }
     var imagenParaVer by remember { mutableStateOf<String?>(null) }
@@ -103,7 +109,19 @@ fun DetalleSolicitudScreen(
             ) {
                 Box(modifier = Modifier.padding(16.dp)) {
                     Button(
-                        onClick = { onConfirmarPostulacion(propuestaTexto) },
+                        onClick = {
+                            val monto = montoTexto.toDoubleOrNull()
+                            if (monto == null || monto <= 0) {
+                                Toast.makeText(context, "Ingresa un monto válido para la propuesta", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            if (propuestaTexto.trim().isEmpty()) {
+                                Toast.makeText(context, "Escribe una breve descripción de tu propuesta", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+
+                            onConfirmarPostulacion(monto, propuestaTexto.trim())
+                        },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF8F00)),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
@@ -399,19 +417,38 @@ fun DetalleSolicitudScreen(
                         color = Color(0xFF0F172A)
                     )
 
+                    // Campo de Valor / Precio Estimado
+                    OutlinedTextField(
+                        value = montoTexto,
+                        onValueChange = { montoTexto = it },
+                        label = { Text("Valor Estimado / Visita ($)") },
+                        placeholder = { Text("Ej: 50000") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFFFF8F00),
+                            unfocusedBorderColor = Color(0xFFE2E8F0),
+                            focusedContainerColor = Color(0xFFF8FAFC),
+                            unfocusedContainerColor = Color(0xFFF8FAFC)
+                        )
+                    )
+
+                    // Campo de Mensaje
                     OutlinedTextField(
                         value = propuestaTexto,
                         onValueChange = { propuestaTexto = it },
                         placeholder = {
                             Text(
-                                text = "Escribe una propuesta o mensaje inicial para el cliente junto con el posible costo de su visita y arreglo...",
+                                text = "Escribe un mensaje de presentación para el cliente describiendo cómo solucionarás su problema...",
                                 fontSize = 13.sp,
                                 color = Color(0xFF94A3B8)
                             )
                         },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(110.dp),
+                            .height(100.dp),
                         shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color(0xFFFF8F00),

@@ -151,9 +151,19 @@ fun ProviderMainContainer(
             DetalleSolicitudScreen(
                 solicitud = solicitudSeleccionada!!,
                 onBack = { solicitudSeleccionada = null },
-                onConfirmarPostulacion = { _ ->
-                    Toast.makeText(context, "Postulación enviada correctamente", Toast.LENGTH_SHORT).show()
-                    solicitudSeleccionada = null
+                onConfirmarPostulacion = { monto, propuesta ->
+                    viewModel.postularASolicitud(
+                        solicitudId = solicitudSeleccionada!!.id,
+                        montoPropuesta = monto,
+                        mensajePresentacion = propuesta,
+                        onSuccess = {
+                            Toast.makeText(context, "¡Postulación enviada con éxito!", Toast.LENGTH_SHORT).show()
+                            solicitudSeleccionada = null // Cierra el detalle y vuelve al listado
+                        },
+                        onError = { mensajeError ->
+                            Toast.makeText(context, mensajeError, Toast.LENGTH_LONG).show()
+                        }
+                    )
                 }
             )
         } else {
