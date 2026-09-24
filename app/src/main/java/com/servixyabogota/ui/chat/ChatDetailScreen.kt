@@ -16,9 +16,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AttachMoney
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.PlayArrow
@@ -35,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -47,6 +51,7 @@ import coil.compose.AsyncImage
 import coil.decode.VideoFrameDecoder
 import coil.request.ImageRequest
 import kotlinx.coroutines.launch
+import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -68,14 +73,13 @@ fun ChatDetailScreen(
     val context = LocalContext.current
     var messageText by remember { mutableStateOf("") }
     var selectedMediaUri by remember { mutableStateOf<Uri?>(null) }
+    var showOfertaDialog by remember { mutableStateOf(false) }
 
-    // Estados para ver multimedia (foto o video) en pantalla completa
     var previewMediaUrl by remember { mutableStateOf<String?>(null) }
     var previewIsVideo by remember { mutableStateOf(false) }
 
     val colorTema = if (esCliente) Color(0xFF2563EB) else Color(0xFFF97316)
 
-    // Lector de archivos con validación de límite de 5MB
     val mediaPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
@@ -84,14 +88,10 @@ fun ChatDetailScreen(
                 it.statSize
             } ?: 0L
 
-            val maximoPermitido = 5 * 1024 * 1024 // 5 MB en bytes
+            val maximoPermitido = 5 * 1024 * 1024 // 5 MB
 
             if (tamanoEnBytes > maximoPermitido) {
-                Toast.makeText(
-                    context,
-                    "El archivo supera el límite de 5 MB. Elige un archivo más liviano.",
-                    Toast.LENGTH_LONG
-                ).show()
+                Toast.makeText(context, "El archivo supera el límite de 5 MB.", Toast.LENGTH_LONG).show()
             } else {
                 selectedMediaUri = uri
             }
@@ -118,7 +118,16 @@ fun ChatDetailScreen(
         }
     }
 
-    // VISOR A PANTALLA COMPLETA (FOTO O VIDEO)
+    if (showOfertaDialog) {
+        CrearOfertaDialog(
+            onDismiss = { showOfertaDialog = false },
+            onEnviar = { monto, desc ->
+                viewModel.enviarOferta(monto, desc)
+                showOfertaDialog = false
+            }
+        )
+    }
+
     if (previewMediaUrl != null) {
         if (previewIsVideo) {
             VideoPlayerDialog(
@@ -352,9 +361,9 @@ fun ChatDetailScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         IconButton(onClick = {
                             mediaPickerLauncher.launch(
@@ -367,6 +376,18 @@ fun ChatDetailScreen(
                                 tint = Color(0xFF64748B),
                                 modifier = Modifier.size(24.dp)
                             )
+                        }
+
+                        // Botón especial para que el Prestador Cotice/Ofrezca tarifa
+                        if (!esCliente) {
+                            IconButton(onClick = { showOfertaDialog = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.AttachMoney,
+                                    contentDescription = "Ofrecer Tarifa",
+                                    tint = Color(0xFF16A34A),
+                                    modifier = Modifier.size(26.dp)
+                                )
+                            }
                         }
 
                         OutlinedTextField(
@@ -462,10 +483,14 @@ fun ChatDetailScreen(
                         ChatBubbleFirebase(
                             mensaje = msg,
                             isFromMe = msg.emisorId == currentUserId,
+                            esCliente = esCliente,
                             colorTema = colorTema,
                             onMediaClick = { url, esVideo ->
                                 previewMediaUrl = url
                                 previewIsVideo = esVideo
+                            },
+                            onResponderOferta = { aceptada ->
+                                viewModel.responderOferta(msg.id, aceptada)
                             }
                         )
                     }
@@ -479,8 +504,10 @@ fun ChatDetailScreen(
 fun ChatBubbleFirebase(
     mensaje: MensajeChat,
     isFromMe: Boolean,
+    esCliente: Boolean,
     colorTema: Color = Color(0xFF2563EB),
-    onMediaClick: (url: String, esVideo: Boolean) -> Unit = { _, _ -> }
+    onMediaClick: (url: String, esVideo: Boolean) -> Unit = { _, _ -> },
+    onResponderOferta: (aceptada: Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val horaFormateada = remember(mensaje.fechaEnvio) {
@@ -500,69 +527,81 @@ fun ChatBubbleFirebase(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isFromMe) Alignment.End else Alignment.Start
     ) {
-        Surface(
-            color = if (isFromMe) colorTema else Color(0xFFE2E8F0),
-            shape = RoundedCornerShape(
-                topStart = 16.dp,
-                topEnd = 16.dp,
-                bottomStart = if (isFromMe) 16.dp else 4.dp,
-                bottomEnd = if (isFromMe) 4.dp else 16.dp
-            ),
-            modifier = Modifier.widthIn(max = 280.dp)
-        ) {
-            Column(modifier = Modifier.padding(all = 6.dp)) {
-                val mediaUrl = mensaje.mediaUrl.takeIf { !it.isNullOrEmpty() } ?: mensaje.imagenUrl.takeIf { it.isNotEmpty() }
+        if (mensaje.esOferta) {
+            // TARJETA DE OFERTA/COTIZACIÓN
+            OfertaCard(
+                mensaje = mensaje,
+                isFromMe = isFromMe,
+                esCliente = esCliente,
+                colorTema = colorTema,
+                onResponderOferta = onResponderOferta
+            )
+        } else {
+            // MENSAJE DE TEXTO O MULTIMEDIA ESTÁNDAR
+            Surface(
+                color = if (isFromMe) colorTema else Color(0xFFE2E8F0),
+                shape = RoundedCornerShape(
+                    topStart = 16.dp,
+                    topEnd = 16.dp,
+                    bottomStart = if (isFromMe) 16.dp else 4.dp,
+                    bottomEnd = if (isFromMe) 4.dp else 16.dp
+                ),
+                modifier = Modifier.widthIn(max = 280.dp)
+            ) {
+                Column(modifier = Modifier.padding(all = 6.dp)) {
+                    val mediaUrl = mensaje.mediaUrl.takeIf { !it.isNullOrEmpty() } ?: mensaje.imagenUrl.takeIf { it.isNotEmpty() }
 
-                if (!mediaUrl.isNullOrEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.Black.copy(alpha = 0.2f))
-                            .clickable {
-                                onMediaClick(mediaUrl, mensaje.esVideo)
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(context)
-                                .data(mediaUrl)
-                                .crossfade(true)
-                                .build(),
-                            imageLoader = imageLoader,
-                            contentDescription = "Multimedia adjunta",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                    if (!mediaUrl.isNullOrEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(180.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.Black.copy(alpha = 0.2f))
+                                .clickable {
+                                    onMediaClick(mediaUrl, mensaje.esVideo)
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(context)
+                                    .data(mediaUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                imageLoader = imageLoader,
+                                contentDescription = "Multimedia adjunta",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
 
-                        if (mensaje.esVideo) {
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.Black.copy(alpha = 0.6f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.PlayArrow,
-                                    contentDescription = "Reproducir Video",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(32.dp)
-                                )
+                            if (mensaje.esVideo) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.6f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.PlayArrow,
+                                        contentDescription = "Reproducir Video",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                }
                             }
                         }
                     }
-                }
 
-                if (mensaje.texto.isNotBlank()) {
-                    Text(
-                        text = mensaje.texto,
-                        fontSize = 14.sp,
-                        color = if (isFromMe) Color.White else Color(0xFF0F172A),
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                        lineHeight = 20.sp
-                    )
+                    if (mensaje.texto.isNotBlank()) {
+                        Text(
+                            text = mensaje.texto,
+                            fontSize = 14.sp,
+                            color = if (isFromMe) Color.White else Color(0xFF0F172A),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            lineHeight = 20.sp
+                        )
+                    }
                 }
             }
         }
@@ -589,6 +628,209 @@ fun ChatBubbleFirebase(
             }
         }
     }
+}
+
+// TARJETA DE OFERTA DENTRO DEL CHAT
+@Composable
+fun OfertaCard(
+    mensaje: MensajeChat,
+    isFromMe: Boolean,
+    esCliente: Boolean,
+    colorTema: Color,
+    onResponderOferta: (aceptada: Boolean) -> Unit
+) {
+    val formatoMoneda = remember { NumberFormat.getCurrencyInstance(Locale("es", "CO")) }
+    val montoFormateado = formatoMoneda.format(mensaje.montoOferta)
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+        modifier = Modifier
+            .width(280.dp)
+            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(16.dp))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Cotización de Servicio",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF64748B)
+                )
+
+                // Badge de estado
+                val (estadoTexto, estadoBg, estadoFg) = when (mensaje.estadoOferta) {
+                    "ACEPTADA" -> Triple("Aceptada", Color(0xFFDCFCE7), Color(0xFF15803D))
+                    "RECHAZADA" -> Triple("Rechazada", Color(0xFFFEE2E2), Color(0xFFB91C1C))
+                    else -> Triple("Pendiente", Color(0xFFFEF3C7), Color(0xFFB45309))
+                }
+
+                Surface(
+                    color = estadoBg,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = estadoTexto,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = estadoFg,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = montoFormateado,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color(0xFF0F172A)
+            )
+
+            if (mensaje.texto.isNotBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = mensaje.texto,
+                    fontSize = 13.sp,
+                    color = Color(0xFF475569)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // ACCIONES SEGÚN EL ROL
+            when {
+                // Si el cliente ve la oferta y está PENDIENTE
+                esCliente && mensaje.estadoOferta == "PENDIENTE" -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { onResponderOferta(false) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
+                            contentPadding = PaddingValues(vertical = 8.dp)
+                        ) {
+                            Text("Rechazar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = { onResponderOferta(true) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)),
+                            contentPadding = PaddingValues(vertical = 8.dp)
+                        ) {
+                            Text("Aceptar", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                }
+                mensaje.estadoOferta == "ACEPTADA" -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF22C55E), modifier = Modifier.size(16.dp))
+                        Text(
+                            text = "Oferta aceptada por el cliente",
+                            fontSize = 12.sp,
+                            color = Color(0xFF15803D),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+                mensaje.estadoOferta == "RECHAZADA" -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
+                        Text(
+                            text = "Oferta rechazada",
+                            fontSize = 12.sp,
+                            color = Color(0xFFB91C1C),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+                else -> {
+                    Text(
+                        text = "Esperando respuesta del cliente...",
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+    }
+}
+
+// DIÁLOGO PARA CREAR OFERTA (PRESTADOR)
+@Composable
+fun CrearOfertaDialog(
+    onDismiss: () -> Unit,
+    onEnviar: (monto: Double, descripcion: String) -> Unit
+) {
+    var montoTexto by remember { mutableStateOf("") }
+    var descripcion by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(text = "Ofrecer Tarifa al Cliente", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = montoTexto,
+                    onValueChange = { montoTexto = it },
+                    label = { Text("Valor de la tarifa ($)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = descripcion,
+                    onValueChange = { descripcion = it },
+                    label = { Text("Descripción / Detalles (Opcional)") },
+                    maxLines = 3,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val monto = montoTexto.toDoubleOrNull() ?: 0.0
+                    if (monto > 0) {
+                        onEnviar(monto, descripcion.trim())
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF97316))
+            ) {
+                Text("Enviar Oferta")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar")
+            }
+        }
+    )
 }
 
 // VISOR DE IMÁGENES A PANTALLA COMPLETA
@@ -633,7 +875,7 @@ fun ImageViewerDialog(
     }
 }
 
-// REPRODUCTOR DE VIDEO A PANTALLA COMPLETA (TAMAÑO AMPLIO)
+// REPRODUCTOR DE VIDEO A PANTALLA COMPLETA
 @Composable
 fun VideoPlayerDialog(
     videoUrl: String,

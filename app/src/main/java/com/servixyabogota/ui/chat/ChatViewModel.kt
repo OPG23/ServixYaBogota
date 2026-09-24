@@ -8,13 +8,12 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageMetadata
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Date
-import com.google.firebase.storage.FirebaseStorage
-import com.google.firebase.storage.StorageMetadata
-
 
 // ==========================================
 // MODELOS DE DATOS DEL CHAT
@@ -24,11 +23,18 @@ data class MensajeChat(
     val emisorId: String = "",
     val texto: String = "",
     val fechaEnvio: Date = Date(),
-    val imagenUrl: String = "",
     val mediaUrl: String? = null,
+    val imagenUrl: String = "",
     val esVideo: Boolean = false,
-    val esPropuesta: Boolean = false,
-    val montoPropuesta: Double = 0.0,
+
+    // Nuevos campos
+    val esOferta: Boolean = false,
+    val montoOferta: Double = 0.0,
+    val estadoOferta: String = "PENDIENTE",
+
+    // Aliases para compatibilidad con código anterior
+    val esPropuesta: Boolean = esOferta,
+    val montoPropuesta: Double = montoOferta,
     val leido: Boolean = false
 )
 
@@ -96,8 +102,8 @@ class ChatViewModel : ViewModel() {
                 }
 
                 if (snapshot != null && snapshot.exists()) {
-                    val propuestaMonto = snapshot.getDouble("propuestaMonto") ?: 0.0
-                    val estadoPropuesta = snapshot.getString("estadoPropuesta") ?: "SIN_PROPUESTA"
+                    val propuestaMonto = snapshot.getDouble("propuestaMonto") ?: snapshot.getDouble("montoOferta") ?: 0.0
+                    val estadoPropuesta = snapshot.getString("estadoPropuesta") ?: snapshot.getString("estadoOferta") ?: "SIN_PROPUESTA"
 
                     val clienteId = snapshot.getString("clienteId") ?: ""
                     val prestadorId = snapshot.getString("prestadorId") ?: ""
@@ -162,7 +168,7 @@ class ChatViewModel : ViewModel() {
             }
     }
 
-    // 4. LISTENER DE MENSAJES EN TIEMPO REAL
+    // 4. LISTENER DE MENSAJES EN TIEMPO REAL (MAPEO CORREGIDO PARA OFERTAS)
     private fun escucharMensajesEnVivo(chatId: String) {
         val coleccionPadre = if (esChatDirecto) "chats" else "solicitudes"
 
@@ -184,9 +190,11 @@ class ChatViewModel : ViewModel() {
                         val fecha = timestamp?.toDate() ?: Date()
                         val mediaUrl = doc.getString("mediaUrl") ?: doc.getString("imagenUrl")
                         val esVideo = doc.getBoolean("esVideo") ?: false
-                        val esPropuesta = doc.getBoolean("esPropuesta") ?: false
-                        val montoPropuesta = doc.getDouble("montoPropuesta") ?: 0.0
-                        val leido = doc.getBoolean("leido") ?: false
+
+                        // Campos de oferta (soporta ambos nombres para retrocompatibilidad)
+                        val esOferta = doc.getBoolean("esOferta") ?: doc.getBoolean("esPropuesta") ?: false
+                        val montoOferta = doc.getDouble("montoOferta") ?: doc.getDouble("montoPropuesta") ?: 0.0
+                        val estadoOferta = doc.getString("estadoOferta") ?: "PENDIENTE"
 
                         MensajeChat(
                             id = doc.id,
@@ -196,9 +204,12 @@ class ChatViewModel : ViewModel() {
                             imagenUrl = mediaUrl ?: "",
                             mediaUrl = mediaUrl,
                             esVideo = esVideo,
-                            esPropuesta = esPropuesta,
-                            montoPropuesta = montoPropuesta,
-                            leido = leido
+                            esOferta = esOferta,
+                            montoOferta = montoOferta,
+                            estadoOferta = estadoOferta,
+                            esPropuesta = esOferta,
+                            montoPropuesta = montoOferta,
+                            leido = doc.getBoolean("leido") ?: false
                         )
                     }
 
@@ -227,9 +238,9 @@ class ChatViewModel : ViewModel() {
             "mediaUrl" to (mediaUrl ?: ""),
             "imagenUrl" to (mediaUrl ?: ""),
             "esVideo" to esVideo,
-            "esPropuesta" to false,
-            "montoPropuesta" to 0.0,
-            "leido" to false
+            "esOferta" to false,
+            "montoOferta" to 0.0,
+            "estadoOferta" to "PENDIENTE"
         )
 
         val textoResumen = when {
@@ -273,7 +284,6 @@ class ChatViewModel : ViewModel() {
             .child(chatIdActual)
             .child(nombreArchivo)
 
-        // Definir la metadata correcta para Firebase
         val metadata = StorageMetadata.Builder()
             .setContentType(mimeType)
             .build()
@@ -297,39 +307,89 @@ class ChatViewModel : ViewModel() {
             }
     }
 
-    // 7. ENVIAR PROPUESTA O COTIZACIÓN
-    fun enviarPropuesta(monto: Double, descripcion: String) {
+    // 7. ENVIAR OFERTA / COTIZACIÓN DE SERVICIO (PRESTADOR)
+    fun enviarOferta(monto: Double, descripcion: String) {
         if (chatIdActual.isBlank() || currentUserIdActual.isBlank() || monto <= 0) return
 
-        val batch = db.batch()
-        val docSolicitud = db.collection("solicitudes").document(chatIdActual)
-        val nuevoMensajeRef = docSolicitud.collection("mensajes").document()
+        val coleccionPadre = if (esChatDirecto) "chats" else "solicitudes"
+        val refPadre = db.collection(coleccionPadre).document(chatIdActual)
+        val refMensaje = refPadre.collection("mensajes").document()
 
-        val mensajePropuesta = hashMapOf(
+        val textoFormateado = if (descripcion.isBlank()) "Oferta de servicio enviada" else descripcion.trim()
+
+        val mensajeOferta = hashMapOf(
+            "id" to refMensaje.id,
             "emisorId" to currentUserIdActual,
-            "texto" to "Propuesta formal de servicio: \$${monto.toLong()} COP\n$descripcion",
+            "texto" to textoFormateado,
             "fechaEnvio" to Timestamp.now(),
             "mediaUrl" to "",
             "imagenUrl" to "",
             "esVideo" to false,
-            "esPropuesta" to true,
-            "montoPropuesta" to monto,
-            "leido" to false
+            "esOferta" to true,
+            "montoOferta" to monto,
+            "estadoOferta" to "PENDIENTE"
         )
-        batch.set(nuevoMensajeRef, mensajePropuesta)
 
-        val actualizacionSolicitud = mapOf(
-            "propuestaMonto" to monto,
-            "estadoPropuesta" to "PENDIENTE",
-            "ultimoMensaje" to "Propuesta enviada: \$${monto.toLong()} COP",
-            "fechaUltimoMensaje" to Timestamp.now()
+        val batch = db.batch()
+        batch.set(refMensaje, mensajeOferta)
+
+        val datosUltimoMensaje = mutableMapOf<String, Any>(
+            "ultimoMensaje" to "Oferta de servicio: $$monto",
+            "fechaUltimoMensaje" to Timestamp.now(),
+            "ultimoEmisorId" to currentUserIdActual
         )
-        batch.update(docSolicitud, actualizacionSolicitud)
+
+        if (!esChatDirecto) {
+            datosUltimoMensaje["propuestaMonto"] = monto
+            datosUltimoMensaje["estadoPropuesta"] = "PENDIENTE"
+        }
+
+        batch.set(refPadre, datosUltimoMensaje, SetOptions.merge())
+        batch.commit()
+    }
+
+    // 8. ACEPTAR O RECHAZAR OFERTA (CLIENTE)
+    fun responderOferta(mensajeId: String, aceptada: Boolean) {
+        if (chatIdActual.isBlank() || mensajeId.isBlank()) return
+
+        val coleccionPadre = if (esChatDirecto) "chats" else "solicitudes"
+        val nuevoEstado = if (aceptada) "ACEPTADA" else "RECHAZADA"
+
+        val refPadre = db.collection(coleccionPadre).document(chatIdActual)
+        val refMensaje = refPadre.collection("mensajes").document(mensajeId)
+
+        val batch = db.batch()
+
+        // Actualiza el mensaje individual en el subcolección "mensajes"
+        batch.update(refMensaje, "estadoOferta", nuevoEstado)
+
+        // Si pertenece a una solicitud, actualiza también la cabecera
+        if (!esChatDirecto) {
+            val actualizacionesSolicitud = mutableMapOf<String, Any>(
+                "estadoPropuesta" to nuevoEstado
+            )
+            if (aceptada) {
+                actualizacionesSolicitud["estado"] = "EN_PROCESO"
+            }
+            batch.update(refPadre, actualizacionesSolicitud)
+        }
 
         batch.commit()
     }
 
-    // 8. ACEPTAR O RECHAZAR PROPUESTAS
+    private fun detenerListeners() {
+        documentoListener?.remove()
+        mensajesListener?.remove()
+        documentoListener = null
+        mensajesListener = null
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        detenerListeners()
+    }
+
+    // FUNCIONES DE COMPATIBILIDAD CON CÓDIGO ANTERIOR
     fun aceptarPropuesta() {
         if (chatIdActual.isBlank() || esChatDirecto) return
 
@@ -349,17 +409,5 @@ class ChatViewModel : ViewModel() {
         db.collection("solicitudes")
             .document(chatIdActual)
             .update("estadoPropuesta", "RECHAZADA")
-    }
-
-    private fun detenerListeners() {
-        documentoListener?.remove()
-        mensajesListener?.remove()
-        documentoListener = null
-        mensajesListener = null
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        detenerListeners()
     }
 }
