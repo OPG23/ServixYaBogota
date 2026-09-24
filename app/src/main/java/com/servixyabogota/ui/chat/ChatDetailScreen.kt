@@ -54,6 +54,13 @@ import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Locale
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.LocalOffer
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.ui.text.style.TextAlign
 
 @Composable
 fun ChatDetailScreen(
@@ -631,6 +638,9 @@ fun ChatBubbleFirebase(
 }
 
 // TARJETA DE OFERTA DENTRO DEL CHAT
+// =======================================================
+// 1. TARJETA DE OFERTA MEJORADA (DENTRO DEL CHAT)
+// =======================================================
 @Composable
 fun OfertaCard(
     mensaje: MensajeChat,
@@ -642,141 +652,275 @@ fun OfertaCard(
     val formatoMoneda = remember { NumberFormat.getCurrencyInstance(Locale("es", "CO")) }
     val montoFormateado = formatoMoneda.format(mensaje.montoOferta)
 
+    // Configuración según el estado de la oferta
+    val (estadoTexto, estadoBg, estadoFg, estadoIcono) = when (mensaje.estadoOferta) {
+        "ACEPTADA" -> Quadruple("Aceptada", Color(0xFFDCFCE7), Color(0xFF15803D), Icons.Default.CheckCircle)
+        "RECHAZADA" -> Quadruple("Rechazada", Color(0xFFFEE2E2), Color(0xFFB91C1C), Icons.Default.Cancel)
+        else -> Quadruple("Pendiente", Color(0xFFFEF3C7), Color(0xFFB45309), Icons.Default.HourglassTop)
+    }
+
+    val borderColor = when (mensaje.estadoOferta) {
+        "ACEPTADA" -> Color(0xFF22C55E).copy(alpha = 0.4f)
+        "RECHAZADA" -> Color(0xFFEF4444).copy(alpha = 0.3f)
+        else -> Color(0xFFE2E8F0)
+    }
+
     Card(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         modifier = Modifier
-            .width(280.dp)
-            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(16.dp))
+            .width(285.dp)
+            .border(1.5.dp, borderColor, RoundedCornerShape(20.dp))
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Cabecera estilizada tipo recibo
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        when (mensaje.estadoOferta) {
+                            "ACEPTADA" -> Color(0xFFF0FDF4)
+                            "RECHAZADA" -> Color(0xFFFFF1F2)
+                            else -> Color(0xFFF8FAFC)
+                        }
+                    )
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
-                Text(
-                    text = "Cotización de Servicio",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF64748B)
-                )
-
-                // Badge de estado
-                val (estadoTexto, estadoBg, estadoFg) = when (mensaje.estadoOferta) {
-                    "ACEPTADA" -> Triple("Aceptada", Color(0xFFDCFCE7), Color(0xFF15803D))
-                    "RECHAZADA" -> Triple("Rechazada", Color(0xFFFEE2E2), Color(0xFFB91C1C))
-                    else -> Triple("Pendiente", Color(0xFFFEF3C7), Color(0xFFB45309))
-                }
-
-                Surface(
-                    color = estadoBg,
-                    shape = RoundedCornerShape(12.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
-                        text = estadoTexto,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = estadoFg,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(colorTema.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.LocalOffer,
+                                contentDescription = null,
+                                tint = colorTema,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                        Text(
+                            text = "COTIZACIÓN",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF475569),
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+
+                    // Badge de Estado
+                    Surface(
+                        color = estadoBg,
+                        shape = RoundedCornerShape(50)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = estadoIcono,
+                                contentDescription = null,
+                                tint = estadoFg,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Text(
+                                text = estadoTexto,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = estadoFg
+                            )
+                        }
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(color = Color(0xFFF1F5F9))
 
-            Text(
-                text = montoFormateado,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = Color(0xFF0F172A)
-            )
-
-            if (mensaje.texto.isNotBlank()) {
-                Spacer(modifier = Modifier.height(4.dp))
+            // Cuerpo principal: Monto y Detalles
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                 Text(
-                    text = mensaje.texto,
-                    fontSize = 13.sp,
-                    color = Color(0xFF475569)
+                    text = "Valor de la propuesta",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF94A3B8)
                 )
-            }
 
-            Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(2.dp))
 
-            // ACCIONES SEGÚN EL ROL
-            when {
-                // Si el cliente ve la oferta y está PENDIENTE
-                esCliente && mensaje.estadoOferta == "PENDIENTE" -> {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Text(
+                    text = montoFormateado,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color(0xFF0F172A)
+                )
+
+                if (mensaje.texto.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        color = Color(0xFFF8FAFC),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        OutlinedButton(
-                            onClick = { onResponderOferta(false) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
-                            contentPadding = PaddingValues(vertical = 8.dp)
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("Rechazar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Icon(
+                                imageVector = Icons.Outlined.Description,
+                                contentDescription = null,
+                                tint = Color(0xFF64748B),
+                                modifier = Modifier.size(16.dp).offset(y = 1.dp)
+                            )
+                            Text(
+                                text = mensaje.texto,
+                                fontSize = 12.sp,
+                                color = Color(0xFF334155),
+                                lineHeight = 17.sp
+                            )
                         }
+                    }
+                }
 
-                        Button(
-                            onClick = { onResponderOferta(true) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)),
-                            contentPadding = PaddingValues(vertical = 8.dp)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Acciones y estados de respuesta
+                when {
+                    esCliente && mensaje.estadoOferta == "PENDIENTE" -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("Aceptar", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            OutlinedButton(
+                                onClick = { onResponderOferta(false) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, Color(0xFFFECDD3)),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = Color(0xFFFFF1F2),
+                                    contentColor = Color(0xFFE11D48)
+                                ),
+                                contentPadding = PaddingValues(vertical = 10.dp)
+                            ) {
+                                Text("Rechazar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = { onResponderOferta(true) },
+                                modifier = Modifier.weight(1.2f),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                                elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp),
+                                contentPadding = PaddingValues(vertical = 10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Aceptar", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
                         }
                     }
-                }
-                mensaje.estadoOferta == "ACEPTADA" -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF22C55E), modifier = Modifier.size(16.dp))
-                        Text(
-                            text = "Oferta aceptada por el cliente",
-                            fontSize = 12.sp,
-                            color = Color(0xFF15803D),
-                            fontWeight = FontWeight.Medium
-                        )
+                    mensaje.estadoOferta == "ACEPTADA" -> {
+                        Surface(
+                            color = Color(0xFFDCFCE7),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Color(0xFF16A34A),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (esCliente) "Has aceptado esta tarifa" else "El cliente aceptó la oferta",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF15803D),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
                     }
-                }
-                mensaje.estadoOferta == "RECHAZADA" -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
-                        Text(
-                            text = "Oferta rechazada",
-                            fontSize = 12.sp,
-                            color = Color(0xFFB91C1C),
-                            fontWeight = FontWeight.Medium
-                        )
+                    mensaje.estadoOferta == "RECHAZADA" -> {
+                        Surface(
+                            color = Color(0xFFFEE2E2),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Cancel,
+                                    contentDescription = null,
+                                    tint = Color(0xFFDC2626),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (esCliente) "Has rechazado esta tarifa" else "El cliente rechazó la oferta",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFFB91C1C),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
                     }
-                }
-                else -> {
-                    Text(
-                        text = "Esperando respuesta del cliente...",
-                        fontSize = 12.sp,
-                        color = Color(0xFF64748B),
-                        fontWeight = FontWeight.Medium
-                    )
+                    else -> {
+                        Surface(
+                            color = Color(0xFFFEF3C7),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.HourglassTop,
+                                    contentDescription = null,
+                                    tint = Color(0xFFD97706),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Esperando respuesta...",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFFB45309),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
+private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
 
 // DIÁLOGO PARA CREAR OFERTA (PRESTADOR)
 @Composable
@@ -787,50 +931,170 @@ fun CrearOfertaDialog(
     var montoTexto by remember { mutableStateOf("") }
     var descripcion by remember { mutableStateOf("") }
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text(text = "Ofrecer Tarifa al Cliente", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.88f)
+                .padding(16.dp),
+            shape = RoundedCornerShape(28.dp),
+            color = Color.White,
+            tonalElevation = 6.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Ícono circular decorativo
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFFFF7ED)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFFFEDD5)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AttachMoney,
+                            contentDescription = null,
+                            tint = Color(0xFFF97316),
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Ofrecer Tarifa",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = "Define el costo del servicio para enviárselo al cliente.",
+                    fontSize = 13.sp,
+                    color = Color(0xFF64748B),
+                    textAlign = TextAlign.Center,
+                    lineHeight = 18.sp
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Campo Monto
                 OutlinedTextField(
                     value = montoTexto,
-                    onValueChange = { montoTexto = it },
-                    label = { Text("Valor de la tarifa ($)") },
+                    onValueChange = { input ->
+                        if (input.all { it.isDigit() }) {
+                            montoTexto = input
+                        }
+                    },
+                    label = { Text("Valor / Tarifa (COP)") },
+                    placeholder = { Text("Ej: 80000") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.AttachMoney,
+                            contentDescription = null,
+                            tint = Color(0xFF16A34A)
+                        )
+                    },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFFF97316),
+                        unfocusedBorderColor = Color(0xFFCBD5E1),
+                        focusedLabelColor = Color(0xFFF97316)
+                    ),
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Campo Descripción
                 OutlinedTextField(
                     value = descripcion,
                     onValueChange = { descripcion = it },
-                    label = { Text("Descripción / Detalles (Opcional)") },
+                    label = { Text("Detalles adicionales (Opcional)") },
+                    placeholder = { Text("Ej: Incluye repuestos y mano de obra...") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Outlined.Description,
+                            contentDescription = null,
+                            tint = Color(0xFF64748B)
+                        )
+                    },
                     maxLines = 3,
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFFF97316),
+                        unfocusedBorderColor = Color(0xFFCBD5E1),
+                        focusedLabelColor = Color(0xFFF97316)
+                    ),
                     modifier = Modifier.fillMaxWidth()
                 )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val monto = montoTexto.toDoubleOrNull() ?: 0.0
-                    if (monto > 0) {
-                        onEnviar(monto, descripcion.trim())
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Botones de Acción
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Text(
+                            text = "Cancelar",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF64748B)
+                        )
                     }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF97316))
-            ) {
-                Text("Enviar Oferta")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancelar")
+
+                    val esValido = (montoTexto.toDoubleOrNull() ?: 0.0) > 0
+
+                    Button(
+                        onClick = {
+                            val monto = montoTexto.toDoubleOrNull() ?: 0.0
+                            if (monto > 0) {
+                                onEnviar(monto, descripcion.trim())
+                            }
+                        },
+                        enabled = esValido,
+                        modifier = Modifier.weight(1.3f),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFF97316),
+                            disabledContainerColor = Color(0xFFFED7AA)
+                        )
+                    ) {
+                        Text(
+                            text = "Enviar Oferta",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
             }
         }
-    )
+    }
 }
 
 // VISOR DE IMÁGENES A PANTALLA COMPLETA
