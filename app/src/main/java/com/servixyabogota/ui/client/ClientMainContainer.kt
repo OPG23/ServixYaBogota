@@ -58,10 +58,11 @@ fun ClientMainContainer(
             interlocutorNombre = activeChat.nombrePrestador,
             interlocutorFotoUrl = activeChat.fotoPrestadorUrl ?: pEncontrado?.fotoUrl,
             solicitudInfo = activeChat.tituloSolicitud,
-            actionButtonText = if (activeChat.tituloSolicitud != null) "Confirmar Servicio" else null,
-            onActionButtonClick = {
-                Toast.makeText(context, "Procesando contratación del servicio...", Toast.LENGTH_SHORT).show()
-            },
+            onVerSolicitudClick = if (activeChat.tituloSolicitud != null) {
+                {
+                    Toast.makeText(context, "Mostrando detalle de: ${activeChat.tituloSolicitud}", Toast.LENGTH_SHORT).show()
+                }
+            } else null,
             viewModel = chatViewModel,
             onBack = { chatClienteActivo = null },
             onVerPerfilPrestador = {

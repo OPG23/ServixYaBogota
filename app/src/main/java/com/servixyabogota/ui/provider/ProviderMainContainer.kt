@@ -136,10 +136,15 @@ fun ProviderMainContainer(
             esCliente = false,
             interlocutorNombre = activeChat!!.nombreCliente,
             solicitudInfo = activeChat!!.tituloSolicitud,
-            actionButtonText = if (activeChat!!.tituloSolicitud != null) "Enviar Cotización" else null,
-            onActionButtonClick = {
-                Toast.makeText(context, "Creando cotización para ${activeChat!!.nombreCliente}...", Toast.LENGTH_SHORT).show()
-            },
+            onVerSolicitudClick = if (activeChat!!.tituloSolicitud != null) {
+                {
+                    Toast.makeText(
+                        context,
+                        "Mostrando detalles de: ${activeChat!!.tituloSolicitud}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            } else null,
             viewModel = chatViewModel,
             onBack = { activeChat = null }
         )
