@@ -1,5 +1,11 @@
 package com.servixyabogota.ui.chat
 
+import android.net.Uri
+import android.widget.MediaController
+import android.widget.VideoView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,7 +18,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Person
@@ -24,9 +32,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
@@ -48,10 +61,23 @@ fun ChatDetailScreen(
     onBack: () -> Unit = {},
     onVerPerfilPrestador: (() -> Unit)? = null
 ) {
+    val context = LocalContext.current
     var messageText by remember { mutableStateOf("") }
+    var selectedMediaUri by remember { mutableStateOf<Uri?>(null) }
 
-    // Color primario según rol: Azul para Cliente, Naranja para Prestador
+    // Estados para ver multimedia (foto o video) en pantalla completa
+    var previewMediaUrl by remember { mutableStateOf<String?>(null) }
+    var previewIsVideo by remember { mutableStateOf(false) }
+
     val colorTema = if (esCliente) Color(0xFF2563EB) else Color(0xFFF97316)
+
+    val mediaPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            selectedMediaUri = uri
+        }
+    }
 
     LaunchedEffect(chatId, currentUserId, esCliente) {
         viewModel.inicializarChat(
@@ -70,6 +96,21 @@ fun ChatDetailScreen(
     LaunchedEffect(uiState.mensajes.size) {
         if (uiState.mensajes.isNotEmpty()) {
             listState.animateScrollToItem(uiState.mensajes.size - 1)
+        }
+    }
+
+    // VISOR A PANTALLA COMPLETA (FOTO O VIDEO)
+    if (previewMediaUrl != null) {
+        if (previewIsVideo) {
+            VideoPlayerDialog(
+                videoUrl = previewMediaUrl!!,
+                onDismiss = { previewMediaUrl = null }
+            )
+        } else {
+            ImageViewerDialog(
+                imageUrl = previewMediaUrl!!,
+                onDismiss = { previewMediaUrl = null }
+            )
         }
     }
 
@@ -155,7 +196,7 @@ fun ChatDetailScreen(
                         }
                     }
 
-                    IconButton(onClick = { /* Lógica para llamadas */ }) {
+                    IconButton(onClick = { /* Llamada */ }) {
                         Icon(
                             imageVector = Icons.Outlined.Phone,
                             contentDescription = "Llamar",
@@ -227,72 +268,146 @@ fun ChatDetailScreen(
                     .navigationBarsPadding()
                     .imePadding()
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    IconButton(onClick = { /* Lógica para adjuntar */ }) {
-                        Icon(
-                            imageVector = Icons.Outlined.AttachFile,
-                            contentDescription = "Adjuntar",
-                            tint = Color(0xFF64748B),
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    selectedMediaUri?.let { uri ->
+                        val esVideo = remember(uri) {
+                            context.contentResolver.getType(uri)?.startsWith("video") == true
+                        }
 
-                    OutlinedTextField(
-                        value = messageText,
-                        onValueChange = { messageText = it },
-                        placeholder = {
-                            Text(
-                                text = "Escribe un mensaje...",
-                                fontSize = 14.sp,
-                                color = Color(0xFF94A3B8)
-                            )
-                        },
-                        singleLine = true,
-                        shape = RoundedCornerShape(24.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color.Transparent,
-                            unfocusedBorderColor = Color.Transparent,
-                            focusedContainerColor = Color(0xFFF1F5F9),
-                            unfocusedContainerColor = Color(0xFFF1F5F9)
-                        ),
-                        modifier = Modifier.weight(1f)
-                    )
+                        Box(
+                            modifier = Modifier
+                                .padding(start = 16.dp, top = 8.dp, end = 16.dp)
+                                .size(72.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFFE2E8F0)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                AsyncImage(
+                                    model = uri,
+                                    contentDescription = "Adjunto seleccionado",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
 
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(colorTema) // BOTÓN DE ENVIAR EN NARANJA SI ES PRESTADOR
-                            .clickable {
-                                if (messageText.isNotBlank()) {
-                                    val texto = messageText.trim()
-                                    messageText = ""
-
-                                    viewModel.enviarMensaje(texto)
-
-                                    coroutineScope.launch {
-                                        if (uiState.mensajes.isNotEmpty()) {
-                                            listState.animateScrollToItem(uiState.mensajes.size - 1)
-                                        }
+                                if (esVideo) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(Color.Black.copy(alpha = 0.3f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.PlayArrow,
+                                            contentDescription = "Video",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(28.dp)
+                                        )
                                     }
                                 }
-                            },
-                        contentAlignment = Alignment.Center
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = 6.dp, y = (-6).dp)
+                                    .size(20.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFEF4444))
+                                    .clickable { selectedMediaUri = null },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Quitar",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Enviar",
-                            tint = Color.White,
-                            modifier = Modifier
-                                .size(18.dp)
-                                .offset(x = 1.dp)
+                        IconButton(onClick = {
+                            mediaPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                            )
+                        }) {
+                            Icon(
+                                imageVector = Icons.Outlined.AttachFile,
+                                contentDescription = "Adjuntar Foto o Video",
+                                tint = Color(0xFF64748B),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        OutlinedTextField(
+                            value = messageText,
+                            onValueChange = { messageText = it },
+                            placeholder = {
+                                Text(
+                                    text = if (selectedMediaUri != null) "Añade un comentario..." else "Escribe un mensaje...",
+                                    fontSize = 14.sp,
+                                    color = Color(0xFF94A3B8)
+                                )
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(24.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedContainerColor = Color(0xFFF1F5F9),
+                                unfocusedContainerColor = Color(0xFFF1F5F9)
+                            ),
+                            modifier = Modifier.weight(1f)
                         )
+
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(colorTema)
+                                .clickable {
+                                    if (messageText.isNotBlank() || selectedMediaUri != null) {
+                                        val texto = messageText.trim()
+                                        val mediaAdjunto = selectedMediaUri
+
+                                        messageText = ""
+                                        selectedMediaUri = null
+
+                                        if (mediaAdjunto != null) {
+                                            viewModel.enviarMensajeConMedia(texto, mediaAdjunto, context)
+                                        } else {
+                                            viewModel.enviarMensaje(texto)
+                                        }
+
+                                        coroutineScope.launch {
+                                            if (uiState.mensajes.isNotEmpty()) {
+                                                listState.animateScrollToItem(uiState.mensajes.size - 1)
+                                            }
+                                        }
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "Enviar",
+                                tint = Color.White,
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .offset(x = 1.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -328,7 +443,11 @@ fun ChatDetailScreen(
                         ChatBubbleFirebase(
                             mensaje = msg,
                             isFromMe = msg.emisorId == currentUserId,
-                            colorTema = colorTema
+                            colorTema = colorTema,
+                            onMediaClick = { url, esVideo ->
+                                previewMediaUrl = url
+                                previewIsVideo = esVideo
+                            }
                         )
                     }
                 }
@@ -341,7 +460,8 @@ fun ChatDetailScreen(
 fun ChatBubbleFirebase(
     mensaje: MensajeChat,
     isFromMe: Boolean,
-    colorTema: Color = Color(0xFF2563EB) // TEMA POR DEFECTO
+    colorTema: Color = Color(0xFF2563EB),
+    onMediaClick: (url: String, esVideo: Boolean) -> Unit = { _, _ -> }
 ) {
     val horaFormateada = remember(mensaje.fechaEnvio) {
         val formatter = SimpleDateFormat("hh:mm a", Locale.getDefault())
@@ -353,7 +473,7 @@ fun ChatBubbleFirebase(
         horizontalAlignment = if (isFromMe) Alignment.End else Alignment.Start
     ) {
         Surface(
-            color = if (isFromMe) colorTema else Color(0xFFE2E8F0), // BURBUJA NARANJA SI ES PRESTADOR
+            color = if (isFromMe) colorTema else Color(0xFFE2E8F0),
             shape = RoundedCornerShape(
                 topStart = 16.dp,
                 topEnd = 16.dp,
@@ -362,13 +482,57 @@ fun ChatBubbleFirebase(
             ),
             modifier = Modifier.widthIn(max = 280.dp)
         ) {
-            Text(
-                text = mensaje.texto,
-                fontSize = 14.sp,
-                color = if (isFromMe) Color.White else Color(0xFF0F172A),
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                lineHeight = 20.sp
-            )
+            Column(modifier = Modifier.padding(all = 6.dp)) {
+                val mediaUrl = mensaje.mediaUrl.takeIf { !it.isNullOrEmpty() } ?: mensaje.imagenUrl.takeIf { it.isNotEmpty() }
+
+                if (!mediaUrl.isNullOrEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.Black.copy(alpha = 0.1f))
+                            .clickable {
+                                onMediaClick(mediaUrl, mensaje.esVideo)
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AsyncImage(
+                            model = mediaUrl,
+                            contentDescription = "Multimedia adjunta",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+
+                        if (mensaje.esVideo) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = 0.6f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.PlayArrow,
+                                    contentDescription = "Reproducir Video",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (mensaje.texto.isNotBlank()) {
+                    Text(
+                        text = mensaje.texto,
+                        fontSize = 14.sp,
+                        color = if (isFromMe) Color.White else Color(0xFF0F172A),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        lineHeight = 20.sp
+                    )
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(4.dp))
@@ -387,10 +551,105 @@ fun ChatBubbleFirebase(
                 Icon(
                     imageVector = Icons.Filled.DoneAll,
                     contentDescription = "Enviado",
-                    tint = colorTema, // CHECKMARKS EN NARANJA SI ES PRESTADOR
+                    tint = colorTema,
                     modifier = Modifier.size(16.dp)
                 )
             }
+        }
+    }
+}
+
+// 1. VISOR DE IMÁGENES A PANTALLA COMPLETA
+@Composable
+fun ImageViewerDialog(
+    imageUrl: String,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp)
+                    .statusBarsPadding()
+                    .zIndex(1f)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Cerrar",
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = "Imagen ampliada",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
+
+// 2. REPRODUCCTOR DE VIDEO A PANTALLA COMPLETA
+@Composable
+fun VideoPlayerDialog(
+    videoUrl: String,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp)
+                    .statusBarsPadding()
+                    .zIndex(1f)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Cerrar",
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+
+            AndroidView(
+                factory = { ctx ->
+                    VideoView(ctx).apply {
+                        setVideoURI(Uri.parse(videoUrl))
+                        val mediaController = MediaController(ctx)
+                        mediaController.setAnchorView(this)
+                        setMediaController(mediaController)
+                        setOnPreparedListener { mp ->
+                            mp.isLooping = true
+                            start()
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+            )
         }
     }
 }

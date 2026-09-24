@@ -1,14 +1,18 @@
 package com.servixyabogota.ui.chat
 
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Date
+import com.google.firebase.storage.FirebaseStorage
 
 // ==========================================
 // MODELOS DE DATOS DEL CHAT
@@ -19,6 +23,8 @@ data class MensajeChat(
     val texto: String = "",
     val fechaEnvio: Date = Date(),
     val imagenUrl: String = "",
+    val mediaUrl: String? = null,
+    val esVideo: Boolean = false,
     val esPropuesta: Boolean = false,
     val montoPropuesta: Double = 0.0,
     val leido: Boolean = false
@@ -54,7 +60,6 @@ class ChatViewModel : ViewModel() {
      * Inicializa los escuchadores en tiempo real de Firestore.
      */
     fun inicializarChat(chatId: String, currentUserId: String, esCliente: Boolean) {
-        // Evita duplicar la suscripción si ya está activa la misma sesión de chat
         if (chatIdActual == chatId && currentUserIdActual == currentUserId && _uiState.value.mensajes.isNotEmpty()) {
             return
         }
@@ -175,7 +180,8 @@ class ChatViewModel : ViewModel() {
                         val texto = doc.getString("texto") ?: ""
                         val timestamp = doc.getTimestamp("fechaEnvio")
                         val fecha = timestamp?.toDate() ?: Date()
-                        val imagenUrl = doc.getString("imagenUrl") ?: ""
+                        val mediaUrl = doc.getString("mediaUrl") ?: doc.getString("imagenUrl")
+                        val esVideo = doc.getBoolean("esVideo") ?: false
                         val esPropuesta = doc.getBoolean("esPropuesta") ?: false
                         val montoPropuesta = doc.getDouble("montoPropuesta") ?: 0.0
                         val leido = doc.getBoolean("leido") ?: false
@@ -185,7 +191,9 @@ class ChatViewModel : ViewModel() {
                             emisorId = emisorId,
                             texto = texto,
                             fechaEnvio = fecha,
-                            imagenUrl = imagenUrl,
+                            imagenUrl = mediaUrl ?: "",
+                            mediaUrl = mediaUrl,
+                            esVideo = esVideo,
                             esPropuesta = esPropuesta,
                             montoPropuesta = montoPropuesta,
                             leido = leido
@@ -200,9 +208,13 @@ class ChatViewModel : ViewModel() {
             }
     }
 
-    // 5. ENVIAR MENSAJE DE TEXTO (CORREGIDO)
-    fun enviarMensaje(texto: String, imagenUrl: String? = null) {
-        if (chatIdActual.isBlank() || currentUserIdActual.isBlank() || texto.isBlank()) return
+    // 5. ENVIAR MENSAJE DE TEXTO O MULTIMEDIA
+    fun enviarMensaje(
+        texto: String,
+        mediaUrl: String? = null,
+        esVideo: Boolean = false
+    ) {
+        if (chatIdActual.isBlank() || currentUserIdActual.isBlank() || (texto.isBlank() && mediaUrl.isNullOrEmpty())) return
 
         val coleccionPadre = if (esChatDirecto) "chats" else "solicitudes"
 
@@ -210,31 +222,79 @@ class ChatViewModel : ViewModel() {
             "emisorId" to currentUserIdActual,
             "texto" to texto.trim(),
             "fechaEnvio" to Timestamp.now(),
-            "imagenUrl" to (imagenUrl ?: ""),
+            "mediaUrl" to (mediaUrl ?: ""),
+            "imagenUrl" to (mediaUrl ?: ""),
+            "esVideo" to esVideo,
             "esPropuesta" to false,
             "montoPropuesta" to 0.0,
             "leido" to false
         )
+
+        val textoResumen = when {
+            texto.isNotBlank() -> texto.trim()
+            esVideo -> "📹 Video"
+            else -> "📷 Imagen"
+        }
 
         db.collection(coleccionPadre)
             .document(chatIdActual)
             .collection("mensajes")
             .add(nuevoMensaje)
             .addOnSuccessListener {
-                // Se usa SetOptions.merge() para garantizar que nunca falle ni se cancele la actualización
                 val datosUltimoMensaje = mapOf(
-                    "ultimoMensaje" to texto.trim(),
+                    "ultimoMensaje" to textoResumen,
                     "fechaUltimoMensaje" to Timestamp.now(),
                     "ultimoEmisorId" to currentUserIdActual
                 )
 
                 db.collection(coleccionPadre)
                     .document(chatIdActual)
-                    .set(datosUltimoMensaje, com.google.firebase.firestore.SetOptions.merge())
+                    .set(datosUltimoMensaje, SetOptions.merge())
             }
     }
 
-    // 6. ENVIAR PROPUESTA O COTIZACIÓN
+    // 6. ENVIAR MULTIMEDIA (FOTO O VIDEO)
+    fun enviarMensajeConMedia(texto: String, mediaUri: Uri, context: Context) {
+        if (chatIdActual.isBlank() || currentUserIdActual.isBlank()) return
+
+        val mimeType = context.contentResolver.getType(mediaUri)
+        val esVideo = mimeType?.startsWith("video") == true
+
+        // Indicar que se está cargando/subiendo
+        _uiState.value = _uiState.value.copy(isLoading = true)
+
+        val nombreArchivo = "${System.currentTimeMillis()}_${if (esVideo) "video.mp4" else "imagen.jpg"}"
+
+        // Referencia en Firebase Storage
+        val storageRef = FirebaseStorage.getInstance()
+            .reference
+            .child("chat_media")
+            .child(chatIdActual)
+            .child(nombreArchivo)
+
+        // 1. Subir archivo a Storage
+        storageRef.putFile(mediaUri)
+            .addOnSuccessListener {
+                // 2. Obtener la URL pública de descarga
+                storageRef.downloadUrl.addOnSuccessListener { downloadUrl ->
+                    // 3. Guardar el mensaje en Firestore con la URL pública
+                    enviarMensaje(
+                        texto = texto,
+                        mediaUrl = downloadUrl.toString(),
+                        esVideo = esVideo
+                    )
+                    _uiState.value = _uiState.value.copy(isLoading = false)
+                }
+            }
+            .addOnFailureListener { error ->
+                _uiState.value = _uiState.value.copy(
+                    error = "Error al subir archivo: ${error.message}",
+                    isLoading = false
+                )
+            }
+    }
+
+    // 7. ENVIAR PROPUESTA O COTIZACIÓN
     fun enviarPropuesta(monto: Double, descripcion: String) {
         if (chatIdActual.isBlank() || currentUserIdActual.isBlank() || monto <= 0) return
 
@@ -246,7 +306,9 @@ class ChatViewModel : ViewModel() {
             "emisorId" to currentUserIdActual,
             "texto" to "Propuesta formal de servicio: \$${monto.toLong()} COP\n$descripcion",
             "fechaEnvio" to Timestamp.now(),
+            "mediaUrl" to "",
             "imagenUrl" to "",
+            "esVideo" to false,
             "esPropuesta" to true,
             "montoPropuesta" to monto,
             "leido" to false
@@ -264,7 +326,7 @@ class ChatViewModel : ViewModel() {
         batch.commit()
     }
 
-    // 7. ACEPTAR O RECHAZAR PROPUESTAS
+    // 8. ACEPTAR O RECHAZAR PROPUESTAS
     fun aceptarPropuesta() {
         if (chatIdActual.isBlank() || esChatDirecto) return
 
