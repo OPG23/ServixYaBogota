@@ -26,6 +26,8 @@ import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.google.firebase.firestore.FieldValue
+
 
 // Modelo UI para los chats directos recibidos por el prestador
 data class ProviderDirectChatUi(
@@ -439,6 +441,78 @@ class ProviderViewModel : ViewModel() {
             )
             val result = repository.enviarPropuesta(solicitudId, propuesta)
             onResult(result.isSuccess)
+        }
+    }
+
+    fun postularASolicitud(
+        solicitudId: String,
+        montoPropuesta: Double,
+        mensajePresentacion: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val prestadorId = auth.currentUser?.uid
+        if (prestadorId.isNullOrEmpty()) {
+            onError("Debes iniciar sesión para postularte")
+            return
+        }
+
+        viewModelScope.launch {
+            // 1. Obtener datos del prestador
+            db.collection("usuarios").document(prestadorId).get()
+                .addOnSuccessListener { docPrestador ->
+                    val nombrePrestador = docPrestador.getString("nombreCompleto")
+                        ?: docPrestador.getString("nombre") ?: "Prestador ServixYa"
+                    val fotoPrestador = docPrestador.getString("fotoUrl") ?: ""
+                    val calificacion = docPrestador.getDouble("calificacion") ?: 5.0
+                    val totalResenas = docPrestador.getLong("totalResenas")?.toInt() ?: 0
+
+                    val datosPropuesta = hashMapOf(
+                        "prestadorId" to prestadorId,
+                        "prestadorNombre" to nombrePrestador,
+                        "prestadorFotoUrl" to fotoPrestador,
+                        "calificacion" to calificacion,
+                        "totalResenas" to totalResenas,
+                        "monto" to montoPropuesta,
+                        "mensaje" to mensajePresentacion,
+                        "fechaPostulacion" to Timestamp.now(),
+                        "estado" to "PENDIENTE"
+                    )
+
+                    val batch = db.batch()
+
+                    // 2. Guardar postulación en subcolección
+                    val propuestaRef = db.collection("solicitudes")
+                        .document(solicitudId)
+                        .collection("propuestas")
+                        .document(prestadorId)
+
+                    batch.set(propuestaRef, datosPropuesta, SetOptions.merge())
+
+                    // 3. Incrementar contador de interesados en la solicitud
+                    val solicitudRef = db.collection("solicitudes").document(solicitudId)
+                    batch.update(solicitudRef, "numeroInteresados", FieldValue.increment(1))
+
+                    // 4. Crear primer mensaje en el chat del servicio
+                    val primerMensajeRef = solicitudRef.collection("mensajes").document()
+                    val primerMensaje = hashMapOf(
+                        "id" to primerMensajeRef.id,
+                        "emisorId" to prestadorId,
+                        "texto" to "Hola, me he postulado a tu solicitud. $mensajePresentacion",
+                        "fechaEnvio" to Timestamp.now(),
+                        "esOferta" to true,
+                        "montoOferta" to montoPropuesta,
+                        "estadoOferta" to "PENDIENTE"
+                    )
+                    batch.set(primerMensajeRef, primerMensaje)
+
+                    batch.commit()
+                        .addOnSuccessListener { onSuccess() }
+                        .addOnFailureListener { e -> onError(e.localizedMessage ?: "Error al enviar la postulación") }
+                }
+                .addOnFailureListener { e ->
+                    onError(e.localizedMessage ?: "Error al consultar perfil del prestador")
+                }
         }
     }
 }

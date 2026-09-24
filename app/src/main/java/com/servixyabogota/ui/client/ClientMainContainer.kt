@@ -208,16 +208,18 @@ fun ClientMainContainer(
                     ClientReceivedProposalsScreen(
                         solicitudId = selectedProposalRequestId!!,
                         onBack = { selectedProposalRequestId = null },
-                        onOpenChat = { _ ->
+                        onOpenChat = { solicitudId, prestadorId, nombrePrestador ->
                             chatClienteActivo = ChatClienteUi(
-                                id = selectedProposalRequestId!!,
-                                nombrePrestador = "Prestador",
+                                id = solicitudId,
+                                nombrePrestador = nombrePrestador,
+                                prestadorId = prestadorId,
                                 tituloSolicitud = "Propuesta de Servicio"
                             )
                         }
                     )
                 } else {
                     ClientProposalsScreen(
+                        clientViewModel = viewModel, // <-- Se añade la referencia al ViewModel
                         onNavigateTab = { selectedTab ->
                             currentSettingsSubScreen = null
                             selectedProposalRequestId = null
