@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -57,71 +58,88 @@ fun ProviderMessagesContainerScreen(
             onDispose { }
         }
 
-        // 1. Escuchar Chats por Solicitudes
-        val listenerSolicitudes = db.collection("solicitudes")
+        // 1. Escuchar Chats por Solicitudes (vía subcolección 'propuestas' y asignaciones directas)
+        val listenerPropuestas = db.collectionGroup("propuestas")
             .whereEqualTo("prestadorId", currentUserId)
-            .addSnapshotListener { snapshot, error ->
-                if (error == null && snapshot != null) {
-                    val listaTemp = mutableListOf<ChatItemUi>()
-                    val totalDocs = snapshot.documents.size
+            .addSnapshotListener { snapshotPropuestas, error ->
+                if (error != null) {
+                    isLoading = false
+                    return@addSnapshotListener
+                }
 
-                    if (totalDocs == 0) {
-                        chatsSolicitudes = emptyList()
-                        isLoading = false
-                    } else {
-                        var procesados = 0
-                        for (doc in snapshot.documents) {
-                            val chatId = doc.id
-                            val clienteId = doc.getString("clienteId") ?: ""
-                            val ultimoMsg = doc.getString("ultimoMensaje") ?: "Solicitud iniciada"
-                            val timestamp = doc.getTimestamp("fechaUltimoMensaje")
-                            val horaFormateada = formatearFecha(timestamp)
-                            val tituloServicio = doc.getString("titulo")
-                                ?: doc.getString("categoria")
-                                ?: doc.getString("servicio")
-                                ?: "Solicitud de Servicio"
-
-                            if (clienteId.isNotBlank()) {
-                                db.collection("usuarios").document(clienteId).get()
-                                    .addOnSuccessListener { clientDoc ->
-                                        val nombreCliente = clientDoc.getString("nombreCompleto")
-                                            ?: clientDoc.getString("nombre")
-                                            ?: "Cliente"
-
-                                        listaTemp.add(
-                                            ChatItemUi(
-                                                id = chatId,
-                                                nombreCliente = nombreCliente,
-                                                ultimoMensaje = ultimoMsg,
-                                                hora = horaFormateada,
-                                                noLeidos = 0,
-                                                tituloSolicitud = tituloServicio
-                                            )
-                                        )
-                                        procesados++
-                                        if (procesados == totalDocs) {
-                                            chatsSolicitudes = listaTemp
-                                            isLoading = false
-                                        }
-                                    }
-                                    .addOnFailureListener {
-                                        procesados++
-                                        if (procesados == totalDocs) {
-                                            chatsSolicitudes = listaTemp
-                                            isLoading = false
-                                        }
-                                    }
+                if (snapshotPropuestas == null || snapshotPropuestas.isEmpty) {
+                    // Si no hay postulaciones en subcolecciones, verificar solicitudes asignadas directamente
+                    db.collection("solicitudes")
+                        .whereEqualTo("prestadorId", currentUserId)
+                        .get()
+                        .addOnSuccessListener { snapshotSolicitudes ->
+                            if (snapshotSolicitudes.isEmpty) {
+                                chatsSolicitudes = emptyList()
+                                isLoading = false
                             } else {
-                                procesados++
-                                if (procesados == totalDocs) {
-                                    chatsSolicitudes = listaTemp
+                                cargarDetallesSolicitudes(
+                                    solicitudDocs = snapshotSolicitudes.documents,
+                                    db = db
+                                ) { lista ->
+                                    chatsSolicitudes = lista
                                     isLoading = false
                                 }
                             }
                         }
+                        .addOnFailureListener {
+                            chatsSolicitudes = emptyList()
+                            isLoading = false
+                        }
+                    return@addSnapshotListener
+                }
+
+                // Obtener los documentos de las solicitudes padre
+                val propuestasDocs = snapshotPropuestas.documents
+                val solicitudesMap = mutableMapOf<String, DocumentSnapshot>()
+                val totalPropuestas = propuestasDocs.size
+                var procesadasPropuestas = 0
+
+                for (propDoc in propuestasDocs) {
+                    val solicitudRef = propDoc.reference.parent.parent
+                    if (solicitudRef != null) {
+                        solicitudRef.get().addOnSuccessListener { solDoc ->
+                            if (solDoc.exists()) {
+                                solicitudesMap[solDoc.id] = solDoc
+                            }
+                            procesadasPropuestas++
+                            if (procesadasPropuestas == totalPropuestas) {
+                                cargarDetallesSolicitudes(
+                                    solicitudDocs = solicitudesMap.values.toList(),
+                                    db = db
+                                ) { lista ->
+                                    chatsSolicitudes = lista
+                                    isLoading = false
+                                }
+                            }
+                        }.addOnFailureListener {
+                            procesadasPropuestas++
+                            if (procesadasPropuestas == totalPropuestas) {
+                                cargarDetallesSolicitudes(
+                                    solicitudDocs = solicitudesMap.values.toList(),
+                                    db = db
+                                ) { lista ->
+                                    chatsSolicitudes = lista
+                                    isLoading = false
+                                }
+                            }
+                        }
+                    } else {
+                        procesadasPropuestas++
+                        if (procesadasPropuestas == totalPropuestas) {
+                            cargarDetallesSolicitudes(
+                                solicitudDocs = solicitudesMap.values.toList(),
+                                db = db
+                            ) { lista ->
+                                chatsSolicitudes = lista
+                                isLoading = false
+                            }
+                        }
                     }
-                } else {
-                    isLoading = false
                 }
             }
 
@@ -190,7 +208,7 @@ fun ProviderMessagesContainerScreen(
             }
 
         onDispose {
-            listenerSolicitudes.remove()
+            listenerPropuestas.remove()
             listenerDirectos.remove()
         }
     }
@@ -273,6 +291,68 @@ fun ProviderMessagesContainerScreen(
                         onClick = { onOpenChat(chat) }
                     )
                 }
+            }
+        }
+    }
+}
+
+private fun cargarDetallesSolicitudes(
+    solicitudDocs: List<DocumentSnapshot>,
+    db: FirebaseFirestore,
+    onResult: (List<ChatItemUi>) -> Unit
+) {
+    if (solicitudDocs.isEmpty()) {
+        onResult(emptyList())
+        return
+    }
+
+    val listaTemp = mutableListOf<ChatItemUi>()
+    var procesados = 0
+    val totalDocs = solicitudDocs.size
+
+    for (doc in solicitudDocs) {
+        val chatId = doc.id
+        val clienteId = doc.getString("clienteId") ?: ""
+        val ultimoMsg = doc.getString("ultimoMensaje") ?: "Solicitud iniciada"
+        val timestamp = doc.getTimestamp("fechaUltimoMensaje")
+        val horaFormateada = formatearFecha(timestamp)
+        val tituloServicio = doc.getString("categoria")
+            ?: doc.getString("servicio")
+            ?: doc.getString("titulo")
+            ?: "Solicitud de Servicio"
+
+        if (clienteId.isNotBlank()) {
+            db.collection("usuarios").document(clienteId).get()
+                .addOnSuccessListener { clientDoc ->
+                    val nombreCliente = clientDoc.getString("nombreCompleto")
+                        ?: clientDoc.getString("nombre")
+                        ?: "Cliente"
+
+                    listaTemp.add(
+                        ChatItemUi(
+                            id = chatId,
+                            nombreCliente = nombreCliente,
+                            ultimoMensaje = ultimoMsg,
+                            hora = horaFormateada,
+                            noLeidos = 0,
+                            tituloSolicitud = tituloServicio
+                        )
+                    )
+                    procesados++
+                    if (procesados == totalDocs) {
+                        onResult(listaTemp.distinctBy { it.id })
+                    }
+                }
+                .addOnFailureListener {
+                    procesados++
+                    if (procesados == totalDocs) {
+                        onResult(listaTemp.distinctBy { it.id })
+                    }
+                }
+        } else {
+            procesados++
+            if (procesados == totalDocs) {
+                onResult(listaTemp.distinctBy { it.id })
             }
         }
     }
