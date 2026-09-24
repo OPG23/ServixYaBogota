@@ -28,7 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil.compose.AsyncImage // <-- IMPORTANTE: Librería Coil
+import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -39,7 +39,7 @@ fun ChatDetailScreen(
     currentUserId: String = "usuario_demo",
     esCliente: Boolean = true,
     interlocutorNombre: String = "",
-    interlocutorFotoUrl: String? = null, // <-- NUEVO PARÁMETRO
+    interlocutorFotoUrl: String? = null,
     subtituloOnline: String = "En línea",
     solicitudInfo: String? = null,
     actionButtonText: String? = null,
@@ -49,6 +49,9 @@ fun ChatDetailScreen(
     onVerPerfilPrestador: (() -> Unit)? = null
 ) {
     var messageText by remember { mutableStateOf("") }
+
+    // Color primario según rol: Azul para Cliente, Naranja para Prestador
+    val colorTema = if (esCliente) Color(0xFF2563EB) else Color(0xFFF97316)
 
     LaunchedEffect(chatId, currentUserId, esCliente) {
         viewModel.inicializarChat(
@@ -101,7 +104,6 @@ fun ChatDetailScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(contentAlignment = Alignment.BottomEnd) {
-                            // CONTENEDOR DE LA FOTO DE PERFIL / AVATAR
                             Box(
                                 modifier = Modifier
                                     .size(42.dp)
@@ -126,7 +128,6 @@ fun ChatDetailScreen(
                                 }
                             }
 
-                            // Indicador de estado en línea
                             Box(
                                 modifier = Modifier
                                     .size(12.dp)
@@ -267,7 +268,7 @@ fun ChatDetailScreen(
                         modifier = Modifier
                             .size(44.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF2563EB))
+                            .background(colorTema) // BOTÓN DE ENVIAR EN NARANJA SI ES PRESTADOR
                             .clickable {
                                 if (messageText.isNotBlank()) {
                                     val texto = messageText.trim()
@@ -305,7 +306,7 @@ fun ChatDetailScreen(
             if (uiState.isLoading && uiState.mensajes.isEmpty()) {
                 CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center),
-                    color = Color(0xFF2563EB)
+                    color = colorTema
                 )
             } else if (uiState.mensajes.isEmpty()) {
                 Text(
@@ -326,7 +327,8 @@ fun ChatDetailScreen(
                     items(uiState.mensajes, key = { it.id }) { msg ->
                         ChatBubbleFirebase(
                             mensaje = msg,
-                            isFromMe = msg.emisorId == currentUserId
+                            isFromMe = msg.emisorId == currentUserId,
+                            colorTema = colorTema
                         )
                     }
                 }
@@ -338,7 +340,8 @@ fun ChatDetailScreen(
 @Composable
 fun ChatBubbleFirebase(
     mensaje: MensajeChat,
-    isFromMe: Boolean
+    isFromMe: Boolean,
+    colorTema: Color = Color(0xFF2563EB) // TEMA POR DEFECTO
 ) {
     val horaFormateada = remember(mensaje.fechaEnvio) {
         val formatter = SimpleDateFormat("hh:mm a", Locale.getDefault())
@@ -350,7 +353,7 @@ fun ChatBubbleFirebase(
         horizontalAlignment = if (isFromMe) Alignment.End else Alignment.Start
     ) {
         Surface(
-            color = if (isFromMe) Color(0xFF2563EB) else Color(0xFFE2E8F0),
+            color = if (isFromMe) colorTema else Color(0xFFE2E8F0), // BURBUJA NARANJA SI ES PRESTADOR
             shape = RoundedCornerShape(
                 topStart = 16.dp,
                 topEnd = 16.dp,
@@ -384,7 +387,7 @@ fun ChatBubbleFirebase(
                 Icon(
                     imageVector = Icons.Filled.DoneAll,
                     contentDescription = "Enviado",
-                    tint = Color(0xFF2563EB),
+                    tint = colorTema, // CHECKMARKS EN NARANJA SI ES PRESTADOR
                     modifier = Modifier.size(16.dp)
                 )
             }
