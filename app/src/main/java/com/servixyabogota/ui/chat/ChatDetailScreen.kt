@@ -2,6 +2,7 @@ package com.servixyabogota.ui.chat
 
 import android.net.Uri
 import android.widget.MediaController
+import android.widget.Toast
 import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -41,7 +42,10 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.ImageLoader
 import coil.compose.AsyncImage
+import coil.decode.VideoFrameDecoder
+import coil.request.ImageRequest
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -71,11 +75,26 @@ fun ChatDetailScreen(
 
     val colorTema = if (esCliente) Color(0xFF2563EB) else Color(0xFFF97316)
 
+    // Lector de archivos con validación de límite de 5MB
     val mediaPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
-            selectedMediaUri = uri
+            val tamanoEnBytes = context.contentResolver.openFileDescriptor(uri, "r")?.use {
+                it.statSize
+            } ?: 0L
+
+            val maximoPermitido = 5 * 1024 * 1024 // 5 MB en bytes
+
+            if (tamanoEnBytes > maximoPermitido) {
+                Toast.makeText(
+                    context,
+                    "El archivo supera el límite de 5 MB. Elige un archivo más liviano.",
+                    Toast.LENGTH_LONG
+                ).show()
+            } else {
+                selectedMediaUri = uri
+            }
         }
     }
 
@@ -463,9 +482,18 @@ fun ChatBubbleFirebase(
     colorTema: Color = Color(0xFF2563EB),
     onMediaClick: (url: String, esVideo: Boolean) -> Unit = { _, _ -> }
 ) {
+    val context = LocalContext.current
     val horaFormateada = remember(mensaje.fechaEnvio) {
         val formatter = SimpleDateFormat("hh:mm a", Locale.getDefault())
         formatter.format(mensaje.fechaEnvio)
+    }
+
+    val imageLoader = remember(context) {
+        ImageLoader.Builder(context)
+            .components {
+                add(VideoFrameDecoder.Factory())
+            }
+            .build()
     }
 
     Column(
@@ -491,14 +519,18 @@ fun ChatBubbleFirebase(
                             .fillMaxWidth()
                             .height(180.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color.Black.copy(alpha = 0.1f))
+                            .background(Color.Black.copy(alpha = 0.2f))
                             .clickable {
                                 onMediaClick(mediaUrl, mensaje.esVideo)
                             },
                         contentAlignment = Alignment.Center
                     ) {
                         AsyncImage(
-                            model = mediaUrl,
+                            model = ImageRequest.Builder(context)
+                                .data(mediaUrl)
+                                .crossfade(true)
+                                .build(),
+                            imageLoader = imageLoader,
                             contentDescription = "Multimedia adjunta",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
@@ -559,7 +591,7 @@ fun ChatBubbleFirebase(
     }
 }
 
-// 1. VISOR DE IMÁGENES A PANTALLA COMPLETA
+// VISOR DE IMÁGENES A PANTALLA COMPLETA
 @Composable
 fun ImageViewerDialog(
     imageUrl: String,
@@ -601,7 +633,7 @@ fun ImageViewerDialog(
     }
 }
 
-// 2. REPRODUCCTOR DE VIDEO A PANTALLA COMPLETA
+// REPRODUCTOR DE VIDEO A PANTALLA COMPLETA (TAMAÑO AMPLIO)
 @Composable
 fun VideoPlayerDialog(
     videoUrl: String,
@@ -609,7 +641,10 @@ fun VideoPlayerDialog(
 ) {
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
         Box(
             modifier = Modifier
@@ -646,9 +681,7 @@ fun VideoPlayerDialog(
                         }
                     }
                 },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
+                modifier = Modifier.fillMaxSize()
             )
         }
     }

@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Date
 import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageMetadata
+
 
 // ==========================================
 // MODELOS DE DATOS DEL CHAT
@@ -257,27 +259,28 @@ class ChatViewModel : ViewModel() {
     fun enviarMensajeConMedia(texto: String, mediaUri: Uri, context: Context) {
         if (chatIdActual.isBlank() || currentUserIdActual.isBlank()) return
 
-        val mimeType = context.contentResolver.getType(mediaUri)
-        val esVideo = mimeType?.startsWith("video") == true
+        val mimeType = context.contentResolver.getType(mediaUri) ?: "image/jpeg"
+        val esVideo = mimeType.startsWith("video")
 
-        // Indicar que se está cargando/subiendo
         _uiState.value = _uiState.value.copy(isLoading = true)
 
-        val nombreArchivo = "${System.currentTimeMillis()}_${if (esVideo) "video.mp4" else "imagen.jpg"}"
+        val extension = if (esVideo) "mp4" else "jpg"
+        val nombreArchivo = "${System.currentTimeMillis()}_media.$extension"
 
-        // Referencia en Firebase Storage
         val storageRef = FirebaseStorage.getInstance()
             .reference
             .child("chat_media")
             .child(chatIdActual)
             .child(nombreArchivo)
 
-        // 1. Subir archivo a Storage
-        storageRef.putFile(mediaUri)
+        // Definir la metadata correcta para Firebase
+        val metadata = StorageMetadata.Builder()
+            .setContentType(mimeType)
+            .build()
+
+        storageRef.putFile(mediaUri, metadata)
             .addOnSuccessListener {
-                // 2. Obtener la URL pública de descarga
                 storageRef.downloadUrl.addOnSuccessListener { downloadUrl ->
-                    // 3. Guardar el mensaje en Firestore con la URL pública
                     enviarMensaje(
                         texto = texto,
                         mediaUrl = downloadUrl.toString(),
