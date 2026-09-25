@@ -42,6 +42,7 @@ data class ChatUiState(
     val mensajes: List<MensajeChat> = emptyList(),
     val propuestaMonto: Double = 0.0,
     val estadoPropuesta: String = "SIN_PROPUESTA", // SIN_PROPUESTA, PENDIENTE, ACEPTADA, RECHAZADA
+    val idContraparte: String = "",
     val nombreContraparte: String = "",
     val fotoContraparte: String = "",
     val rolContraparte: String = "",
@@ -106,7 +107,10 @@ class ChatViewModel : ViewModel() {
                     val estadoPropuesta = snapshot.getString("estadoPropuesta") ?: snapshot.getString("estadoOferta") ?: "SIN_PROPUESTA"
 
                     val clienteId = snapshot.getString("clienteId") ?: ""
-                    val prestadorId = snapshot.getString("prestadorId") ?: ""
+                    val prestadorId = snapshot.getString("prestadorId")
+                        ?: snapshot.getString("idPrestador")
+                        ?: snapshot.getString("prestadorSeleccionadoId")
+                        ?: ""
 
                     val idContraparte = if (esCliente) prestadorId else clienteId
                     val rolContraparte = if (esCliente) "Prestador" else "Cliente"
@@ -114,6 +118,7 @@ class ChatViewModel : ViewModel() {
                     _uiState.value = _uiState.value.copy(
                         propuestaMonto = propuestaMonto,
                         estadoPropuesta = estadoPropuesta,
+                        idContraparte = idContraparte,
                         rolContraparte = rolContraparte
                     )
 
@@ -142,7 +147,10 @@ class ChatViewModel : ViewModel() {
                     val idContraparte = if (esCliente) prestadorId else clienteId
                     val rolContraparte = if (esCliente) "Prestador" else "Cliente"
 
-                    _uiState.value = _uiState.value.copy(rolContraparte = rolContraparte)
+                    _uiState.value = _uiState.value.copy(
+                        idContraparte = idContraparte,
+                        rolContraparte = rolContraparte
+                    )
 
                     if (idContraparte.isNotBlank()) {
                         cargarDatosContraparte(idContraparte)
@@ -168,7 +176,7 @@ class ChatViewModel : ViewModel() {
             }
     }
 
-    // 4. LISTENER DE MENSAJES EN TIEMPO REAL (MAPEO CORREGIDO PARA OFERTAS)
+    // 4. LISTENER DE MENSAJES EN TIEMPO REAL
     private fun escucharMensajesEnVivo(chatId: String) {
         val coleccionPadre = if (esChatDirecto) "chats" else "solicitudes"
 
@@ -191,7 +199,6 @@ class ChatViewModel : ViewModel() {
                         val mediaUrl = doc.getString("mediaUrl") ?: doc.getString("imagenUrl")
                         val esVideo = doc.getBoolean("esVideo") ?: false
 
-                        // Campos de oferta (soporta ambos nombres para retrocompatibilidad)
                         val esOferta = doc.getBoolean("esOferta") ?: doc.getBoolean("esPropuesta") ?: false
                         val montoOferta = doc.getDouble("montoOferta") ?: doc.getDouble("montoPropuesta") ?: 0.0
                         val estadoOferta = doc.getString("estadoOferta") ?: "PENDIENTE"
@@ -360,7 +367,7 @@ class ChatViewModel : ViewModel() {
 
         val batch = db.batch()
 
-        // Actualiza el mensaje individual en el subcolección "mensajes"
+        // Actualiza el mensaje individual en la subcolección "mensajes"
         batch.update(refMensaje, "estadoOferta", nuevoEstado)
 
         // Si pertenece a una solicitud, actualiza también la cabecera
@@ -370,6 +377,12 @@ class ChatViewModel : ViewModel() {
             )
             if (aceptada) {
                 actualizacionesSolicitud["estado"] = "EN_PROCESO"
+
+                // Obtener el ID del emisor de la oferta (prestador) para asignarlo a la solicitud
+                val emisorOferta = _uiState.value.mensajes.find { it.id == mensajeId }?.emisorId
+                if (!emisorOferta.isNullOrBlank()) {
+                    actualizacionesSolicitud["prestadorId"] = emisorOferta
+                }
             }
             batch.update(refPadre, actualizacionesSolicitud)
         }

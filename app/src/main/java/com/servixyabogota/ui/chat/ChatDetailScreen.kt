@@ -72,7 +72,7 @@ fun ChatDetailScreen(
     onVerSolicitudClick: (() -> Unit)? = null,
     viewModel: ChatViewModel = viewModel(),
     onBack: () -> Unit = {},
-    onVerPerfilPrestador: (() -> Unit)? = null
+    onVerPerfilPrestador: ((idPrestador: String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     var messageText by remember { mutableStateOf("") }
@@ -112,6 +112,7 @@ fun ChatDetailScreen(
 
     val uiState by viewModel.uiState.collectAsState()
     val nombreMostrar = interlocutorNombre.ifBlank { uiState.nombreContraparte.ifEmpty { "Usuario" } }
+    val fotoMostrar = interlocutorFotoUrl.takeIf { !it.isNullOrBlank() } ?: uiState.fotoContraparte
 
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
@@ -170,8 +171,8 @@ fun ChatDetailScreen(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable(enabled = esCliente && onVerPerfilPrestador != null) {
-                                onVerPerfilPrestador?.invoke()
+                            .clickable(enabled = esCliente && onVerPerfilPrestador != null && uiState.idContraparte.isNotBlank()) {
+                                onVerPerfilPrestador?.invoke(uiState.idContraparte)
                             }
                             .padding(vertical = 4.dp, horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -184,9 +185,9 @@ fun ChatDetailScreen(
                                     .background(Color(0xFFCBD5E1)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                if (!interlocutorFotoUrl.isNullOrEmpty()) {
+                                if (fotoMostrar.isNotBlank()) {
                                     AsyncImage(
-                                        model = interlocutorFotoUrl,
+                                        model = fotoMostrar,
                                         contentDescription = "Foto de perfil",
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.fillMaxSize()
