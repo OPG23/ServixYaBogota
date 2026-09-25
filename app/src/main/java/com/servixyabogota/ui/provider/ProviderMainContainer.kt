@@ -11,6 +11,8 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -35,9 +37,15 @@ fun ProviderMainContainer(
     val context = LocalContext.current
     val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
 
-    // Obtenemos el estado de forma segura e inferida
+    // Obtenemos el estado del perfil desde el ViewModel
     val uiStateState = viewModel.uiState.observeAsState(EstadoProveedorUiState())
     val uiState = uiStateState.value ?: EstadoProveedorUiState()
+
+    // Obtenemos la lista en vivo de solicitudes según las categorías y localidades del prestador
+    val solicitudesDisponibles by viewModel.getSolicitudesDisponibles(
+        misCategorias = uiState.categorias,
+        misLocalidades = uiState.localidades
+    ).collectAsState(initial = emptyList())
 
     // NAVEGACIÓN PRINCIPAL
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Trabajos, 1: Mensajes, 2: Historial, 3: Perfil
@@ -140,14 +148,14 @@ fun ProviderMainContainer(
             solicitudInfo = currentChat.tituloSolicitud,
             onVerSolicitudClick = if (!currentChat.tituloSolicitud.isNullOrEmpty()) {
                 {
-                    // Se crea o busca la solicitud asignando los datos del chat
-                    val solicitudEncontrada = Solicitud(
+                    // Buscamos la solicitud completa dentro de la lista de solicitudes disponibles recuperadas por el ViewModel
+                    val solicitudEncontrada = solicitudesDisponibles.find { it.id == currentChat.id }
+
+                    solicitudSeleccionada = solicitudEncontrada ?: Solicitud(
                         id = currentChat.id,
                         categoria = currentChat.tituloSolicitud ?: "Solicitud"
                     )
-
-                    solicitudSeleccionada = solicitudEncontrada
-                    activeChat = null // Cierra el chat para que se muestre DetalleSolicitudScreen
+                    activeChat = null // Cerramos el chat para abrir el detalle de la solicitud
                 }
             } else null,
             viewModel = chatViewModel,
