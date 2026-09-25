@@ -516,4 +516,28 @@ class ProviderViewModel : ViewModel() {
                 }
         }
     }
+
+    /**
+     * Obtiene los datos completos de una solicitud desde Firestore mediante su ID,
+     * sin importar el estado en el que se encuentre (PENDIENTE, EN_PROCESO, etc.).
+     */
+    fun obtenerSolicitudPorId(solicitudId: String, onResult: (Solicitud?) -> Unit) {
+        if (solicitudId.isBlank()) {
+            onResult(null)
+            return
+        }
+
+        db.collection("solicitudes").document(solicitudId).get()
+            .addOnSuccessListener { document ->
+                if (document.exists()) {
+                    val solicitud = document.toObject(Solicitud::class.java)?.copy(id = document.id)
+                    onResult(solicitud)
+                } else {
+                    onResult(null)
+                }
+            }
+            .addOnFailureListener {
+                onResult(null)
+            }
+    }
 }

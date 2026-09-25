@@ -148,20 +148,35 @@ fun ProviderMainContainer(
             solicitudInfo = currentChat.tituloSolicitud,
             onVerSolicitudClick = if (!currentChat.tituloSolicitud.isNullOrEmpty()) {
                 {
-                    // Buscamos la solicitud completa dentro de la lista de solicitudes disponibles recuperadas por el ViewModel
-                    val solicitudEncontrada = solicitudesDisponibles.find { it.id == currentChat.id }
+                    // 1. Intentamos buscarla primero en la lista local disponible
+                    val localFound = solicitudesDisponibles.find { it.id == currentChat.id }
 
-                    solicitudSeleccionada = solicitudEncontrada ?: Solicitud(
-                        id = currentChat.id,
-                        categoria = currentChat.tituloSolicitud ?: "Solicitud"
-                    )
-                    activeChat = null // Cerramos el chat para abrir el detalle de la solicitud
+                    if (localFound != null) {
+                        solicitudSeleccionada = localFound
+                        activeChat = null // Cerramos el chat para mostrar el detalle
+                    } else {
+                        // 2. Si pasó a EN_PROCESO y ya no está disponible públicamente,
+                        // la traemos directamente desde Firestore usando su ID.
+                        viewModel.obtenerSolicitudPorId(currentChat.id) { solicitudCargada ->
+                            if (solicitudCargada != null) {
+                                solicitudSeleccionada = solicitudCargada
+                                activeChat = null // Cerramos el chat para abrir la solicitud completa
+                            } else {
+                                Toast.makeText(
+                                    context,
+                                    "No se pudo cargar la información de la solicitud.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    }
                 }
             } else null,
             viewModel = chatViewModel,
             onBack = { activeChat = null }
         )
     }
+
     // 2. SI EL PRESTADOR ESTÁ APROBADO: Muestra la App Principal
     else if (uiState.estadoVerificacion == "APROBADO") {
         // Sub-pantalla de Detalle de Solicitud (al pulsar postularme)

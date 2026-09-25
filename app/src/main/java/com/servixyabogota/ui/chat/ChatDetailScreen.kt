@@ -243,7 +243,7 @@ fun ChatDetailScreen(
                 // FRANJA QUE MUESTRA LA SOLICITUD (SOLO VISIBLE PARA EL PRESTADOR Y TOCABLE)
                 if (!esCliente && !solicitudInfo.isNullOrEmpty()) {
                     Surface(
-                        color = Color(0xFFE0F2FE),
+                        color = Color(0xFFFFF3E0), // Fondo naranja claro/cálido
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable(enabled = onVerSolicitudClick != null) {
@@ -265,7 +265,7 @@ fun ChatDetailScreen(
                                 Icon(
                                     imageVector = Icons.Outlined.Build,
                                     contentDescription = null,
-                                    tint = Color(0xFF0284C7),
+                                    tint = Color(0xFFE65100), // Naranja oscuro para el ícono
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Column {
@@ -280,7 +280,7 @@ fun ChatDetailScreen(
                                             text = "Toca para ver el detalle de la solicitud",
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Medium,
-                                            color = Color(0xFF0284C7)
+                                            color = Color(0xFFE65100) // Texto en naranja
                                         )
                                     }
                                 }
@@ -290,7 +290,7 @@ fun ChatDetailScreen(
                                 Icon(
                                     imageVector = Icons.Default.ChevronRight,
                                     contentDescription = "Ver solicitud",
-                                    tint = Color(0xFF0284C7),
+                                    tint = Color(0xFFE65100),
                                     modifier = Modifier.size(22.dp)
                                 )
                             }
