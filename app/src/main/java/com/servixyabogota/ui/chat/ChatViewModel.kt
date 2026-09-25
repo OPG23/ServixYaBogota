@@ -42,6 +42,7 @@ data class ChatUiState(
     val mensajes: List<MensajeChat> = emptyList(),
     val propuestaMonto: Double = 0.0,
     val estadoPropuesta: String = "SIN_PROPUESTA", // SIN_PROPUESTA, PENDIENTE, ACEPTADA, RECHAZADA
+    val estadoSolicitud: String = "", // PENDIENTE, EN_PROCESO, COMPLETADO, etc.
     val idContraparte: String = "",
     val nombreContraparte: String = "",
     val fotoContraparte: String = "",
@@ -105,6 +106,7 @@ class ChatViewModel : ViewModel() {
                 if (snapshot != null && snapshot.exists()) {
                     val propuestaMonto = snapshot.getDouble("propuestaMonto") ?: snapshot.getDouble("montoOferta") ?: 0.0
                     val estadoPropuesta = snapshot.getString("estadoPropuesta") ?: snapshot.getString("estadoOferta") ?: "SIN_PROPUESTA"
+                    val estadoSolicitud = snapshot.getString("estado") ?: ""
 
                     val clienteId = snapshot.getString("clienteId") ?: ""
                     val prestadorId = snapshot.getString("prestadorId")
@@ -118,6 +120,7 @@ class ChatViewModel : ViewModel() {
                     _uiState.value = _uiState.value.copy(
                         propuestaMonto = propuestaMonto,
                         estadoPropuesta = estadoPropuesta,
+                        estadoSolicitud = estadoSolicitud,
                         idContraparte = idContraparte,
                         rolContraparte = rolContraparte
                     )
@@ -318,6 +321,9 @@ class ChatViewModel : ViewModel() {
     fun enviarOferta(monto: Double, descripcion: String) {
         if (chatIdActual.isBlank() || currentUserIdActual.isBlank() || monto <= 0) return
 
+        // Bloqueo de seguridad adicional en el ViewModel
+        if (_uiState.value.estadoPropuesta == "ACEPTADA") return
+
         val coleccionPadre = if (esChatDirecto) "chats" else "solicitudes"
         val refPadre = db.collection(coleccionPadre).document(chatIdActual)
         val refMensaje = refPadre.collection("mensajes").document()
@@ -367,10 +373,8 @@ class ChatViewModel : ViewModel() {
 
         val batch = db.batch()
 
-        // Actualiza el mensaje individual en la subcolección "mensajes"
         batch.update(refMensaje, "estadoOferta", nuevoEstado)
 
-        // Si pertenece a una solicitud, actualiza también la cabecera
         if (!esChatDirecto) {
             val actualizacionesSolicitud = mutableMapOf<String, Any>(
                 "estadoPropuesta" to nuevoEstado
@@ -378,7 +382,6 @@ class ChatViewModel : ViewModel() {
             if (aceptada) {
                 actualizacionesSolicitud["estado"] = "EN_PROCESO"
 
-                // Obtener el ID del emisor de la oferta (prestador) para asignarlo a la solicitud
                 val emisorOferta = _uiState.value.mensajes.find { it.id == mensajeId }?.emisorId
                 if (!emisorOferta.isNullOrBlank()) {
                     actualizacionesSolicitud["prestadorId"] = emisorOferta
@@ -388,6 +391,21 @@ class ChatViewModel : ViewModel() {
         }
 
         batch.commit()
+    }
+
+    // 9. COMPLETAR SERVICIO (CLIENTE)
+    fun completarServicio(onSuccess: () -> Unit = {}, onError: (String) -> Unit = {}) {
+        if (chatIdActual.isBlank() || esChatDirecto) return
+
+        db.collection("solicitudes").document(chatIdActual)
+            .update("estado", "COMPLETADO")
+            .addOnSuccessListener {
+                enviarMensaje("🎉 El cliente ha marcado el servicio como COMPLETADO.")
+                onSuccess()
+            }
+            .addOnFailureListener { error ->
+                onError(error.message ?: "Error al completar el servicio")
+            }
     }
 
     private fun detenerListeners() {

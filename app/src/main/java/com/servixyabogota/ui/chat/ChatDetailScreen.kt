@@ -78,6 +78,7 @@ fun ChatDetailScreen(
     var messageText by remember { mutableStateOf("") }
     var selectedMediaUri by remember { mutableStateOf<Uri?>(null) }
     var showOfertaDialog by remember { mutableStateOf(false) }
+    var showConfirmCompletarDialog by remember { mutableStateOf(false) }
 
     var previewMediaUrl by remember { mutableStateOf<String?>(null) }
     var previewIsVideo by remember { mutableStateOf(false) }
@@ -114,6 +115,10 @@ fun ChatDetailScreen(
     val nombreMostrar = interlocutorNombre.ifBlank { uiState.nombreContraparte.ifEmpty { "Usuario" } }
     val fotoMostrar = interlocutorFotoUrl.takeIf { !it.isNullOrBlank() } ?: uiState.fotoContraparte
 
+    // Estados de control de oferta y servicio
+    val cotizacionAceptada = uiState.estadoPropuesta == "ACEPTADA" || uiState.mensajes.any { it.esOferta && it.estadoOferta == "ACEPTADA" }
+    val servicioCompletado = uiState.estadoSolicitud == "COMPLETADO" || uiState.estadoSolicitud == "FINALIZADO"
+
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
@@ -129,6 +134,37 @@ fun ChatDetailScreen(
             onEnviar = { monto, desc ->
                 viewModel.enviarOferta(monto, desc)
                 showOfertaDialog = false
+            }
+        )
+    }
+
+    if (showConfirmCompletarDialog) {
+        AlertDialog(
+            onDismissRequest = { showConfirmCompletarDialog = false },
+            title = { Text("Completar Servicio", fontWeight = FontWeight.Bold) },
+            text = { Text("¿Confirmas que el servicio ha sido realizado satisfactoriamente?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showConfirmCompletarDialog = false
+                        viewModel.completarServicio(
+                            onSuccess = {
+                                Toast.makeText(context, "¡Servicio completado!", Toast.LENGTH_SHORT).show()
+                            },
+                            onError = { err ->
+                                Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A))
+                ) {
+                    Text("Sí, Completar", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirmCompletarDialog = false }) {
+                    Text("Cancelar")
+                }
             }
         )
     }
@@ -241,10 +277,78 @@ fun ChatDetailScreen(
 
                 HorizontalDivider(color = Color(0xFFF1F5F9))
 
+                // BANNER DE ESTADO DEL SERVICIO / OFERTA ACEPTADA
+                if (cotizacionAceptada && !servicioCompletado) {
+                    Surface(
+                        color = Color(0xFFDCFCE7),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Cotización aceptada • En proceso",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF15803D)
+                                )
+                                Text(
+                                    text = if (esCliente) "Al finalizar el trabajo, marca el servicio como completado." else "Trata los detalles finales con el cliente.",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF166534)
+                                )
+                            }
+
+                            if (esCliente) {
+                                Button(
+                                    onClick = { showConfirmCompletarDialog = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text("Completar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                } else if (servicioCompletado) {
+                    Surface(
+                        color = Color(0xFFF1F5F9),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = Color(0xFF16A34A),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Servicio Completado",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF334155)
+                            )
+                        }
+                    }
+                }
+
                 // FRANJA QUE MUESTRA LA SOLICITUD (SOLO VISIBLE PARA EL PRESTADOR Y TOCABLE)
                 if (!esCliente && !solicitudInfo.isNullOrEmpty()) {
                     Surface(
-                        color = Color(0xFFFFF3E0), // Fondo naranja claro/cálido
+                        color = Color(0xFFFFF3E0),
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable(enabled = onVerSolicitudClick != null) {
@@ -266,7 +370,7 @@ fun ChatDetailScreen(
                                 Icon(
                                     imageVector = Icons.Outlined.Build,
                                     contentDescription = null,
-                                    tint = Color(0xFFE65100), // Naranja oscuro para el ícono
+                                    tint = Color(0xFFE65100),
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Column {
@@ -281,7 +385,7 @@ fun ChatDetailScreen(
                                             text = "Toca para ver el detalle de la solicitud",
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Medium,
-                                            color = Color(0xFFE65100) // Texto en naranja
+                                            color = Color(0xFFE65100)
                                         )
                                     }
                                 }
@@ -391,7 +495,8 @@ fun ChatDetailScreen(
                             )
                         }
 
-                        if (!esCliente) {
+                        // EL BOTÓN DE ENVIAR OFERTA SOLO APARECE SI LA OFERTA NO HA SIDO ACEPTADA
+                        if (!esCliente && !cotizacionAceptada && !servicioCompletado) {
                             IconButton(onClick = { showOfertaDialog = true }) {
                                 Icon(
                                     imageVector = Icons.Default.AttachMoney,
@@ -904,8 +1009,6 @@ fun VideoPlayerDialog(
     videoUrl: String,
     onDismiss: () -> Unit
 ) {
-    val context = LocalContext.current
-
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
