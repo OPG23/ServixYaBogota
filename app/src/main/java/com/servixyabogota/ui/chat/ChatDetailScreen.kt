@@ -240,8 +240,8 @@ fun ChatDetailScreen(
 
                 HorizontalDivider(color = Color(0xFFF1F5F9))
 
-                // FRANJA QUE MUESTRA LA SOLICITUD (TOCABLE PARA VER DETALLE)
-                if (!solicitudInfo.isNullOrEmpty()) {
+                // FRANJA QUE MUESTRA LA SOLICITUD (SOLO VISIBLE PARA EL PRESTADOR Y TOCABLE)
+                if (!esCliente && !solicitudInfo.isNullOrEmpty()) {
                     Surface(
                         color = Color(0xFFE0F2FE),
                         modifier = Modifier

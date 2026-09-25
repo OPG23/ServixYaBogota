@@ -130,19 +130,24 @@ fun ProviderMainContainer(
 
     // 1. SI HAY UN CHAT ACTIVO: Superpone ChatDetailScreen
     if (activeChat != null) {
+        val currentChat = activeChat!!
+
         ChatDetailScreen(
-            chatId = activeChat!!.id,
+            chatId = currentChat.id,
             currentUserId = currentUserId,
             esCliente = false,
-            interlocutorNombre = activeChat!!.nombreCliente,
-            solicitudInfo = activeChat!!.tituloSolicitud,
-            onVerSolicitudClick = if (activeChat!!.tituloSolicitud != null) {
+            interlocutorNombre = currentChat.nombreCliente,
+            solicitudInfo = currentChat.tituloSolicitud,
+            onVerSolicitudClick = if (!currentChat.tituloSolicitud.isNullOrEmpty()) {
                 {
-                    Toast.makeText(
-                        context,
-                        "Mostrando detalles de: ${activeChat!!.tituloSolicitud}",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    // Se crea o busca la solicitud asignando los datos del chat
+                    val solicitudEncontrada = Solicitud(
+                        id = currentChat.id,
+                        categoria = currentChat.tituloSolicitud ?: "Solicitud"
+                    )
+
+                    solicitudSeleccionada = solicitudEncontrada
+                    activeChat = null // Cierra el chat para que se muestre DetalleSolicitudScreen
                 }
             } else null,
             viewModel = chatViewModel,
