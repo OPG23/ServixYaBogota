@@ -45,18 +45,12 @@ fun ClientMainContainer(
     if (chatClienteActivo != null) {
         val activeChat = chatClienteActivo!!
 
-        val pEncontrado = viewModel.listaPrestadores.find { prestador ->
-            (activeChat.prestadorId != null && prestador.id == activeChat.prestadorId) ||
-                    prestador.nombre.equals(activeChat.nombrePrestador.trim(), ignoreCase = true) ||
-                    prestador.nombre.contains(activeChat.nombrePrestador.trim(), ignoreCase = true)
-        }
-
         ChatDetailScreen(
             chatId = activeChat.id,
             currentUserId = currentUserId,
             esCliente = true,
             interlocutorNombre = activeChat.nombrePrestador,
-            interlocutorFotoUrl = activeChat.fotoPrestadorUrl ?: pEncontrado?.fotoUrl,
+            interlocutorFotoUrl = activeChat.fotoPrestadorUrl,
             solicitudInfo = activeChat.tituloSolicitud,
             onVerSolicitudClick = if (activeChat.tituloSolicitud != null) {
                 {
@@ -65,15 +59,29 @@ fun ClientMainContainer(
             } else null,
             viewModel = chatViewModel,
             onBack = { chatClienteActivo = null },
-            onVerPerfilPrestador = {
-                if (pEncontrado != null) {
-                    selectedProviderId = pEncontrado.id
+            onVerPerfilPrestador = { idPrestadorEmitido ->
+                // idPrestadorEmitido es el ID real recuperado por ChatViewModel desde Firestore
+                val idTarget = idPrestadorEmitido.ifBlank { activeChat.prestadorId ?: "" }
+
+                val prestadorEncontrado = viewModel.listaPrestadores.find { prestador ->
+                    prestador.id == idTarget ||
+                            (activeChat.prestadorId != null && prestador.id == activeChat.prestadorId) ||
+                            prestador.nombre.equals(activeChat.nombrePrestador.trim(), ignoreCase = true)
+                }
+
+                if (prestadorEncontrado != null) {
+                    selectedProviderId = prestadorEncontrado.id
+                    showDirectChats = false
+                    chatClienteActivo = null
+                } else if (idTarget.isNotBlank()) {
+                    // Si el ID existe pero no está en la lista reducida, intentamos asignarlo
+                    selectedProviderId = idTarget
                     showDirectChats = false
                     chatClienteActivo = null
                 } else {
                     Toast.makeText(
                         context,
-                        "No se encontró la información de ${activeChat.nombrePrestador}",
+                        "No se encontró la información del prestador",
                         Toast.LENGTH_SHORT
                     ).show()
                 }
@@ -135,15 +143,15 @@ fun ClientMainContainer(
     else if (showDirectChats) {
         ClientDirectChatsScreen(
             onBack = { showDirectChats = false },
-            onOpenChat = { chatId, providerName ->
+            onOpenChat = { chatId, providerName, providerId ->
                 val prestadorMatch = viewModel.listaPrestadores.find {
-                    it.nombre.equals(providerName.trim(), ignoreCase = true)
+                    it.id == providerId || it.nombre.equals(providerName.trim(), ignoreCase = true)
                 }
                 chatClienteActivo = ChatClienteUi(
                     id = chatId,
                     nombrePrestador = providerName,
                     fotoPrestadorUrl = prestadorMatch?.fotoUrl,
-                    prestadorId = prestadorMatch?.id,
+                    prestadorId = providerId.ifBlank { prestadorMatch?.id },
                     tituloSolicitud = null
                 )
             }

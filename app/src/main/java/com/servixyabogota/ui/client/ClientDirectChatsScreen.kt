@@ -41,14 +41,15 @@ data class DirectChatUi(
     val lastMessage: String,
     val time: String,
     val unreadCount: Int = 0,
-    val isOnline: Boolean = false
+    val isOnline: Boolean = false,
+    val providerId: String = ""
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ClientDirectChatsScreen(
     onBack: () -> Unit,
-    onOpenChat: (chatId: String, providerName: String) -> Unit
+    onOpenChat: (chatId: String, providerName: String, providerId: String) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var realChats by remember { mutableStateOf<List<DirectChatUi>>(emptyList()) }
@@ -106,7 +107,8 @@ fun ClientDirectChatsScreen(
                                                     lastMessage = ultimoMsg,
                                                     time = horaFormateada,
                                                     unreadCount = 0,
-                                                    isOnline = false
+                                                    isOnline = false,
+                                                    providerId = prestadorId
                                                 )
                                             )
                                             processedCount++
@@ -235,7 +237,7 @@ fun ClientDirectChatsScreen(
                     items(chatsFiltrados, key = { it.id }) { chat ->
                         DirectChatItem(
                             chat = chat,
-                            onClick = { onOpenChat(chat.id, chat.providerName) }
+                            onClick = { onOpenChat(chat.id, chat.providerName, chat.providerId) }
                         )
                     }
                 }
