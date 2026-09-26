@@ -38,9 +38,9 @@ fun ClientProposalsScreen(
 
     // Filtro para incluir únicamente solicitudes en estado activo/pendiente/en proceso
     val solicitudesActivas = remember(listaSolicitudes) {
+        val estadosActivos = setOf("PENDIENTE", "PUBLICADA", "EN_PROCESO")
         listaSolicitudes.filter { solicitud ->
-            val estado = solicitud.estado.uppercase()
-            estado != "CANCELADA" && estado != "CANCELADO" && estado != "FINALIZADA"
+            solicitud.estado.uppercase() in estadosActivos
         }
     }
 
