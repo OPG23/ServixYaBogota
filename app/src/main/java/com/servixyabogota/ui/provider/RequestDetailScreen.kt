@@ -1,5 +1,6 @@
 package com.servixyabogota.ui.provider
 
+import android.media.MediaPlayer
 import android.widget.MediaController
 import android.widget.Toast
 import android.widget.VideoView
@@ -56,16 +57,23 @@ fun DetalleSolicitudScreen(
     val emoji = obtenerEmoji(solicitud.categoria)
     val esUrgente = solicitud.nivelUrgencia.equals("Urgente", ignoreCase = true)
 
-    // MODALES DE MULTIMEDIA
+    // Validación de estado disponible para ofertar
+    val estadosInactivos = setOf(
+        "EN_PROCESO", "COMPLETADA", "COMPLETADO",
+        "FINALIZADA", "FINALIZADO", "CANCELADA", "CANCELADO"
+    )
+    val puedePostularse = solicitud.estado.uppercase() !in estadosInactivos
+
+    // MODALES DE MULTIMEDIA CON NOMBRES ÚNICOS
     videoParaReproducir?.let { videoUrl ->
-        VideoPlayerDialog(
+        SolicitudVideoPlayerDialog(
             videoUrl = videoUrl,
             onDismiss = { videoParaReproducir = null }
         )
     }
 
     imagenParaVer?.let { imageUrl ->
-        ImageViewerDialog(
+        SolicitudImageViewerDialog(
             imageUrl = imageUrl,
             onDismiss = { imagenParaVer = null }
         )
@@ -102,38 +110,40 @@ fun DetalleSolicitudScreen(
             }
         },
         bottomBar = {
-            Surface(
-                color = Color.White,
-                shadowElevation = 8.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Box(modifier = Modifier.padding(16.dp)) {
-                    Button(
-                        onClick = {
-                            val monto = montoTexto.toDoubleOrNull()
-                            if (monto == null || monto <= 0) {
-                                Toast.makeText(context, "Ingresa un monto válido para la propuesta", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
-                            if (propuestaTexto.trim().isEmpty()) {
-                                Toast.makeText(context, "Escribe una breve descripción de tu propuesta", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
+            if (puedePostularse) {
+                Surface(
+                    color = Color.White,
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Box(modifier = Modifier.padding(16.dp)) {
+                        Button(
+                            onClick = {
+                                val monto = montoTexto.toDoubleOrNull()
+                                if (monto == null || monto <= 0) {
+                                    Toast.makeText(context, "Ingresa un monto válido para la propuesta", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                if (propuestaTexto.trim().isEmpty()) {
+                                    Toast.makeText(context, "Escribe una breve descripción de tu propuesta", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
 
-                            onConfirmarPostulacion(monto, propuestaTexto.trim())
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF8F00)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp)
-                    ) {
-                        Text(
-                            text = "Confirmar Postulación",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
+                                onConfirmarPostulacion(monto, propuestaTexto.trim())
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF8F00)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                        ) {
+                            Text(
+                                text = "Confirmar Postulación",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
                     }
                 }
             }
@@ -398,74 +408,93 @@ fun DetalleSolicitudScreen(
                 }
             }
 
-            // 4. PROPUESTA
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1F5F9)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+            // 4. PROPUESTA O BANNER DE ESTADO INACTIVO
+            if (puedePostularse) {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1F5F9)),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = "Tu Propuesta",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A)
-                    )
-
-                    // Campo de Valor / Precio Estimado
-                    OutlinedTextField(
-                        value = montoTexto,
-                        onValueChange = { montoTexto = it },
-                        label = { Text("Valor Estimado / Visita ($)") },
-                        placeholder = { Text("Ej: 50000") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFFFF8F00),
-                            unfocusedBorderColor = Color(0xFFE2E8F0),
-                            focusedContainerColor = Color(0xFFF8FAFC),
-                            unfocusedContainerColor = Color(0xFFF8FAFC)
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Tu Propuesta",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A)
                         )
-                    )
 
-                    // Campo de Mensaje
-                    OutlinedTextField(
-                        value = propuestaTexto,
-                        onValueChange = { propuestaTexto = it },
-                        placeholder = {
-                            Text(
-                                text = "Escribe un mensaje de presentación para el cliente describiendo cómo solucionarás su problema...",
-                                fontSize = 13.sp,
-                                color = Color(0xFF94A3B8)
+                        OutlinedTextField(
+                            value = montoTexto,
+                            onValueChange = { montoTexto = it },
+                            label = { Text("Valor Estimado / Visita ($)") },
+                            placeholder = { Text("Ej: 50000") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFFFF8F00),
+                                unfocusedBorderColor = Color(0xFFE2E8F0),
+                                focusedContainerColor = Color(0xFFF8FAFC),
+                                unfocusedContainerColor = Color(0xFFF8FAFC)
                             )
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(100.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFFFF8F00),
-                            unfocusedBorderColor = Color(0xFFE2E8F0),
-                            focusedContainerColor = Color(0xFFF8FAFC),
-                            unfocusedContainerColor = Color(0xFFF8FAFC)
                         )
-                    )
+
+                        OutlinedTextField(
+                            value = propuestaTexto,
+                            onValueChange = { propuestaTexto = it },
+                            placeholder = {
+                                Text(
+                                    text = "Escribe un mensaje de presentación para el cliente describiendo cómo solucionarás su problema...",
+                                    fontSize = 13.sp,
+                                    color = Color(0xFF94A3B8)
+                                )
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(100.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFFFF8F00),
+                                unfocusedBorderColor = Color(0xFFE2E8F0),
+                                focusedContainerColor = Color(0xFFF8FAFC),
+                                unfocusedContainerColor = Color(0xFFF8FAFC)
+                            )
+                        )
+                    }
+                }
+            } else {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Box(
+                        modifier = Modifier.padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Esta solicitud se encuentra en estado '${solicitud.estado.uppercase()}' y ya no admite nuevas propuestas.",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFF64748B)
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-// DIÁLOGO VIDEO
+// DIÁLOGO VIDEO CON NOMBRE ÚNICO Y TIPO EXPLÍCITO
 @Composable
-private fun VideoPlayerDialog(
+private fun SolicitudVideoPlayerDialog(
     videoUrl: String,
     onDismiss: () -> Unit
 ) {
@@ -485,7 +514,7 @@ private fun VideoPlayerDialog(
                             val mediaController = MediaController(ctx)
                             mediaController.setAnchorView(this)
                             setMediaController(mediaController)
-                            setOnPreparedListener { mp ->
+                            setOnPreparedListener { mp: MediaPlayer ->
                                 mp.isLooping = true
                                 start()
                             }
@@ -511,9 +540,9 @@ private fun VideoPlayerDialog(
     }
 }
 
-// DIÁLOGO IMAGEN
+// DIÁLOGO IMAGEN CON NOMBRE ÚNICO
 @Composable
-private fun ImageViewerDialog(
+private fun SolicitudImageViewerDialog(
     imageUrl: String,
     onDismiss: () -> Unit
 ) {
