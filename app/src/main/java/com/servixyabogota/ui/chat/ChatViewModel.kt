@@ -157,21 +157,33 @@ class ChatViewModel : ViewModel() {
         db.collection("usuarios").document(userId).get()
             .addOnSuccessListener { doc ->
                 if (doc.exists()) {
-                    val nombre = doc.getString("nombre") ?: ""
-                    val apellido = doc.getString("apellido") ?: ""
-                    val nombreCompletoDoc = doc.getString("nombreCompleto") ?: ""
+                    val nombre = doc.getString("nombre")?.trim() ?: ""
+                    val apellido = doc.getString("apellido")?.trim() ?: ""
+                    val nombreCompletoDoc = doc.getString("nombreCompleto")?.trim() ?: ""
 
-                    val nombreFinal = when {
-                        nombre.isNotBlank() && apellido.isNotBlank() -> "$nombre $apellido"
+                    val nombreBase = when {
+                        nombre.isNotBlank() && apellido.isNotBlank() -> {
+                            if (nombre.endsWith(apellido, ignoreCase = true)) {
+                                nombre
+                            } else {
+                                "$nombre $apellido"
+                            }
+                        }
                         nombreCompletoDoc.isNotBlank() -> nombreCompletoDoc
                         nombre.isNotBlank() -> nombre
+                        apellido.isNotBlank() -> apellido
                         else -> "Usuario"
                     }
+
+                    // Elimina cualquier palabra duplicada consecutiva
+                    val nombreFinal = nombreBase.split("\\s+".toRegex())
+                        .distinct()
+                        .joinToString(" ")
 
                     val foto = doc.getString("fotoUrl") ?: doc.getString("fotoPerfil") ?: ""
 
                     _uiState.value = _uiState.value.copy(
-                        nombreContraparte = nombreFinal.trim(),
+                        nombreContraparte = nombreFinal,
                         fotoContraparte = foto
                     )
                 }
