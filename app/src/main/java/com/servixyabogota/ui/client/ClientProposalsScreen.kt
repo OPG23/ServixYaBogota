@@ -32,15 +32,29 @@ fun ClientProposalsScreen(
     onVerChatClick: (String) -> Unit = {},
     onVerChatsDirectosClick: () -> Unit = {}
 ) {
+    var selectedCategory by remember { mutableStateOf("Todas") }
+
     val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
     val misSolicitudesState = remember(currentUserId) { clientViewModel.getMisSolicitudes(currentUserId) }
     val listaSolicitudes by misSolicitudesState.collectAsState()
 
-    // Filtro para incluir únicamente solicitudes en estado activo/pendiente/en proceso
+    // 1. Filtro para incluir únicamente solicitudes en estado activo/pendiente/en proceso
     val solicitudesActivas = remember(listaSolicitudes) {
         val estadosActivos = setOf("PENDIENTE", "PUBLICADA", "EN_PROCESO")
         listaSolicitudes.filter { solicitud ->
             solicitud.estado.uppercase() in estadosActivos
+        }
+    }
+
+    // 2. Filtro en tiempo real por categoría seleccionada
+    val solicitudesFiltradas = remember(selectedCategory, solicitudesActivas) {
+        if (selectedCategory == "Todas") {
+            solicitudesActivas
+        } else {
+            solicitudesActivas.filter { solicitud ->
+                solicitud.categoria.contains(selectedCategory, ignoreCase = true) ||
+                        selectedCategory.contains(solicitud.categoria, ignoreCase = true)
+            }
         }
     }
 
@@ -57,91 +71,111 @@ fun ClientProposalsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .statusBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+                .statusBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(
-                text = "Propuestas y Chats",
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF0F172A)
-            )
-
-            // Acceso a Chats Directos
-            Surface(
-                color = Color(0xFFEFF6FF),
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
+            // ENCABEZADO Y CHATS DIRECTOS
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onVerChatsDirectosClick() }
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Row(
+                Text(
+                    text = "Propuestas y Chats",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+
+                // Acceso a Chats Directos
+                Surface(
+                    color = Color(0xFFEFF6FF),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
                     modifier = Modifier
-                        .padding(16.dp)
-                        .fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .fillMaxWidth()
+                        .clickable { onVerChatsDirectosClick() }
                 ) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .background(Color(0xFF2563EB), CircleShape),
-                            contentAlignment = Alignment.Center
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Chat,
-                                contentDescription = "Chats Directos",
-                                tint = Color.White,
-                                modifier = Modifier.size(22.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .background(Color(0xFF2563EB), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Chat,
+                                    contentDescription = "Chats Directos",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+
+                            Column {
+                                Text(
+                                    text = "Chats Directos",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF0F172A)
+                                )
+                                Text(
+                                    text = "Conversaciones iniciadas desde perfiles",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF64748B)
+                                )
+                            }
                         }
 
-                        Column {
-                            Text(
-                                text = "Chats Directos",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A)
-                            )
-                            Text(
-                                text = "Conversaciones iniciadas desde perfiles",
-                                fontSize = 12.sp,
-                                color = Color(0xFF64748B)
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                            contentDescription = null,
+                            tint = Color(0xFF2563EB),
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
-
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
-                        contentDescription = null,
-                        tint = Color(0xFF2563EB),
-                        modifier = Modifier.size(16.dp)
-                    )
                 }
             }
 
+            // BARRA HORIZONTAL DE FILTRO DE CATEGORÍAS (Reutilizada de ClientDirectChatsScreen)
+            CategoryFilterChips(
+                selectedCategory = selectedCategory,
+                onCategorySelected = { selectedCategory = it }
+            )
+
+            // TÍTULO DE SOLICITUDES EN CURSO
             Text(
                 text = "Solicitudes en curso",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF475569)
+                color = Color(0xFF475569),
+                modifier = Modifier.padding(horizontal = 20.dp)
             )
 
-            if (solicitudesActivas.isEmpty()) {
+            // LISTA O MENSAJE VACÍO
+            if (solicitudesFiltradas.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 32.dp),
+                        .padding(top = 32.dp, start = 20.dp, end = 20.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "No tienes solicitudes activas publicadas.",
+                        text = if (selectedCategory == "Todas") {
+                            "No tienes solicitudes activas publicadas."
+                        } else {
+                            "No tienes solicitudes en curso para '$selectedCategory'."
+                        },
                         color = Color(0xFF94A3B8),
                         fontSize = 14.sp
                     )
@@ -149,9 +183,12 @@ fun ClientProposalsScreen(
             } else {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 20.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
                 ) {
-                    items(solicitudesActivas, key = { it.id }) { solicitud ->
+                    items(solicitudesFiltradas, key = { it.id }) { solicitud ->
                         TarjetaSolicitudCliente(
                             solicitud = solicitud,
                             onVerPropuestasClick = { onVerPropuestasClick(solicitud.id) },
