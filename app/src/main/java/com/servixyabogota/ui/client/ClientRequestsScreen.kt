@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -39,7 +40,7 @@ fun ClientRequestsScreen(
     onVerChatClick: (Solicitud) -> Unit = {},
     onNavigateTab: (String) -> Unit = {}
 ) {
-    val context = LocalContext.current // <-- OBTENEMOS EL CONTEXTO DE LA APLICACIÓN
+    val context = LocalContext.current
 
     var filtroSeleccionado by remember { mutableStateOf("Abiertas") }
     var solicitudAEditar by remember { mutableStateOf<Solicitud?>(null) }
@@ -60,7 +61,7 @@ fun ClientRequestsScreen(
                     direccion = dir,
                     localidad = loc,
                     archivos = archivos,
-                    context = context, // <-- PARÁMETRO 'context' AGREGADO
+                    context = context,
                     onSuccess = { solicitudAEditar = null },
                     onError = { /* Manejar error si ocurre */ }
                 )
@@ -271,6 +272,8 @@ private fun SolicitudCardItem(
     onCancelarClick: () -> Unit,
     onVerChatClick: () -> Unit
 ) {
+    val esProceso = esEstadoEnProceso(solicitud.estado)
+
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -314,7 +317,7 @@ private fun SolicitudCardItem(
                 val estadoTextoLimpio = obtenerEstadoTexto(solicitud.estado)
                 val (estadoBg, estadoTextColor, estadoTexto) = when {
                     esEstadoPendiente(solicitud.estado) -> Triple(Color(0xFFEFF6FF), Color(0xFF2563EB), "ABIERTA")
-                    esEstadoEnProceso(solicitud.estado) -> Triple(Color(0xFFDCFCE7), Color(0xFF16A34A), "EN PROCESO")
+                    esProceso -> Triple(Color(0xFFDCFCE7), Color(0xFF16A34A), "EN PROCESO")
                     estadoTextoLimpio.contains("CANCEL") -> Triple(Color(0xFFFEE2E2), Color(0xFFEF4444), "CANCELADA")
                     else -> Triple(Color(0xFFF1F5F9), Color(0xFF64748B), "COMPLETADA")
                 }
@@ -363,6 +366,34 @@ private fun SolicitudCardItem(
                 color = Color(0xFF94A3B8)
             )
 
+            // Indicador de mensajes no leídos cuando la solicitud está EN_PROCESO
+            if (esProceso) {
+                val tieneMensajesNuevos = solicitud.noLeidosCliente > 0
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(
+                                if (tieneMensajesNuevos) Color(0xFF16A34A) else Color(0xFF94A3B8),
+                                CircleShape
+                            )
+                    )
+                    Text(
+                        text = if (tieneMensajesNuevos) {
+                            if (solicitud.noLeidosCliente == 1) "1 mensaje nuevo" else "${solicitud.noLeidosCliente} mensajes nuevos"
+                        } else {
+                            "Sin mensajes nuevos"
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (tieneMensajesNuevos) Color(0xFF16A34A) else Color(0xFF64748B)
+                    )
+                }
+            }
+
             HorizontalDivider(
                 color = Color(0xFFF1F5F9),
                 thickness = 1.dp,
@@ -404,7 +435,7 @@ private fun SolicitudCardItem(
                         )
                     }
                 }
-            } else if (esEstadoEnProceso(solicitud.estado)) {
+            } else if (esProceso) {
                 Button(
                     onClick = onVerChatClick,
                     shape = RoundedCornerShape(10.dp),
