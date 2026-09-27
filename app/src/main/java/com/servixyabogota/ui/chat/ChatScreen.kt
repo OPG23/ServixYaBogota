@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -44,10 +45,16 @@ fun ChatScreen(
     val uiState by viewModel.uiState.collectAsState()
     var mensajeTexto by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+
+    // Estados vinculados a las IDs del chat para que se reinicien automáticamente al cambiar de conversación
+    var isPrimeraCarga by remember(solicitudId, currentUserId) { mutableStateOf(true) }
+    var mensajesConocidosIds by remember(solicitudId, currentUserId) { mutableStateOf(setOf<String>()) }
 
     // Nombre por defecto según el rol en caso de estar cargando
     val nombrePorDefecto = if (esCliente) "Prestador" else "Cliente"
 
+    // Inicializar viewModel cuando cambien las IDs
     LaunchedEffect(solicitudId, currentUserId, esCliente) {
         viewModel.inicializarChat(
             chatId = solicitudId,
@@ -56,9 +63,25 @@ fun ChatScreen(
         )
     }
 
-    LaunchedEffect(uiState.mensajes.size) {
-        if (uiState.mensajes.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.mensajes.size - 1)
+    // Scroll automático al cargar el chat o al recibir nuevos mensajes
+    LaunchedEffect(uiState.mensajes, uiState.isLoading) {
+        if (uiState.isLoading) return@LaunchedEffect
+
+        val mensajes = uiState.mensajes
+        if (mensajes.isNotEmpty()) {
+            val idsActuales = mensajes.map { it.id }.toSet()
+
+            if (isPrimeraCarga) {
+                mensajesConocidosIds = idsActuales
+                listState.scrollToItem(mensajes.size - 1)
+                isPrimeraCarga = false
+            } else {
+                val nuevosIds = idsActuales - mensajesConocidosIds
+                if (nuevosIds.isNotEmpty()) {
+                    listState.animateScrollToItem(mensajes.size - 1)
+                    mensajesConocidosIds = idsActuales
+                }
+            }
         }
     }
 
@@ -236,6 +259,11 @@ fun ChatScreen(
                             if (mensajeTexto.isNotBlank()) {
                                 viewModel.enviarMensaje(mensajeTexto)
                                 mensajeTexto = ""
+                                coroutineScope.launch {
+                                    if (uiState.mensajes.isNotEmpty()) {
+                                        listState.animateScrollToItem(uiState.mensajes.size - 1)
+                                    }
+                                }
                             }
                         },
                         enabled = mensajeTexto.isNotBlank(),

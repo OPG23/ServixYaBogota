@@ -7,9 +7,6 @@ import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -24,7 +21,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
@@ -150,26 +146,27 @@ fun ChatDetailScreen(
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
-    var mostrarBotonNuevosMensajes by remember { mutableStateOf(false) }
+    var isPrimeraCarga by remember(chatId, currentUserId) { mutableStateOf(true) }
+    var mensajesConocidosIds by remember(chatId, currentUserId) { mutableStateOf(setOf<String>()) }
 
-    val estaAlFinal = remember {
-        derivedStateOf {
-            val totalItems = listState.layoutInfo.totalItemsCount
-            if (totalItems == 0) true
-            else {
-                val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-                lastVisibleIndex >= totalItems - 2
-            }
-        }
-    }
+    // Control de desplazamiento automático sin banner
+    LaunchedEffect(uiState.mensajes, uiState.isLoading) {
+        if (uiState.isLoading) return@LaunchedEffect
 
-    LaunchedEffect(uiState.mensajes.size) {
-        if (uiState.mensajes.isNotEmpty()) {
-            if (estaAlFinal.value) {
-                listState.animateScrollToItem(uiState.mensajes.size - 1)
-                mostrarBotonNuevosMensajes = false
+        val mensajes = uiState.mensajes
+        if (mensajes.isNotEmpty()) {
+            val idsActuales = mensajes.map { it.id }.toSet()
+
+            if (isPrimeraCarga) {
+                mensajesConocidosIds = idsActuales
+                listState.scrollToItem(mensajes.size - 1)
+                isPrimeraCarga = false
             } else {
-                mostrarBotonNuevosMensajes = true
+                val nuevosIds = idsActuales - mensajesConocidosIds
+                if (nuevosIds.isNotEmpty()) {
+                    listState.animateScrollToItem(mensajes.size - 1)
+                    mensajesConocidosIds = idsActuales
+                }
             }
         }
     }
@@ -656,54 +653,6 @@ fun ChatDetailScreen(
                     }
                 }
             }
-
-            AnimatedVisibility(
-                visible = mostrarBotonNuevosMensajes,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 12.dp)
-            ) {
-                Surface(
-                    onClick = {
-                        coroutineScope.launch {
-                            if (uiState.mensajes.isNotEmpty()) {
-                                listState.animateScrollToItem(uiState.mensajes.size - 1)
-                            }
-                            mostrarBotonNuevosMensajes = false
-                        }
-                    },
-                    shape = RoundedCornerShape(20.dp),
-                    color = colorTema,
-                    shadowElevation = 6.dp
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF22C55E))
-                        )
-                        Text(
-                            text = "Nuevos mensajes",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Icon(
-                            imageVector = Icons.Default.ArrowDownward,
-                            contentDescription = "Ir abajo",
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            }
         }
     }
 }
@@ -836,10 +785,6 @@ fun ChatBubbleFirebase(
         }
     }
 }
-
-// ==========================================
-// COMPONENTES AUXILIARES DEL CHAT
-// ==========================================
 
 @Composable
 fun OfertaCard(
