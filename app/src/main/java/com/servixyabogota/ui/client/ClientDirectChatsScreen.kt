@@ -81,6 +81,7 @@ fun ClientDirectChatsScreen(
                                 val prestadorId = doc.getString("prestadorId") ?: ""
                                 val ultimoMsg = doc.getString("ultimoMensaje") ?: "Conversación iniciada"
                                 val timestamp = doc.getTimestamp("fechaUltimoMensaje")
+                                val noLeidos = doc.getLong("noLeidosCliente")?.toInt() ?: 0
                                 val horaFormateada = formatearFecha(timestamp)
 
                                 if (prestadorId.isNotBlank()) {
@@ -106,7 +107,7 @@ fun ClientDirectChatsScreen(
                                                     category = categoriaPrestador,
                                                     lastMessage = ultimoMsg,
                                                     time = horaFormateada,
-                                                    unreadCount = 0,
+                                                    unreadCount = noLeidos,
                                                     isOnline = false,
                                                     providerId = prestadorId
                                                 )
