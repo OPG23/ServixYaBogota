@@ -32,7 +32,6 @@ import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Build
-import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -63,9 +62,10 @@ import java.util.Locale
 @Composable
 fun ChatDetailScreen(
     chatId: String,
-    currentUserId: String = "usuario_demo",
+    currentUserId: String,
     esCliente: Boolean = true,
     interlocutorNombre: String = "",
+    interlocutorApellido: String = "",
     interlocutorFotoUrl: String? = null,
     subtituloOnline: String = "En línea",
     solicitudInfo: String? = null,
@@ -104,15 +104,43 @@ fun ChatDetailScreen(
     }
 
     LaunchedEffect(chatId, currentUserId, esCliente) {
-        viewModel.inicializarChat(
-            chatId = chatId,
-            currentUserId = currentUserId,
-            esCliente = esCliente
-        )
+        if (currentUserId.isNotBlank()) {
+            viewModel.inicializarChat(
+                chatId = chatId,
+                currentUserId = currentUserId,
+                esCliente = esCliente
+            )
+        }
     }
 
     val uiState by viewModel.uiState.collectAsState()
-    val nombreMostrar = interlocutorNombre.ifBlank { uiState.nombreContraparte.ifEmpty { "Usuario" } }
+
+    // Construcción y resolución del Nombre y Apellido Completo
+    val nombreApellidoParametro = remember(interlocutorNombre, interlocutorApellido) {
+        "$interlocutorNombre $interlocutorApellido".trim()
+    }
+
+    val fallbackRol = if (esCliente) "Prestador" else "Cliente"
+    val nombreMostrar = remember(uiState.nombreContraparte, nombreApellidoParametro, esCliente) {
+        when {
+            uiState.nombreContraparte.isNotBlank() -> uiState.nombreContraparte
+            nombreApellidoParametro.isNotBlank() && !nombreApellidoParametro.contains("Usuario") && !nombreApellidoParametro.contains("Prestador") && !nombreApellidoParametro.contains("Cliente") -> nombreApellidoParametro
+            else -> fallbackRol
+        }
+    }
+
+    // Cálculo de iniciales para el Avatar (ej. "Juan Pérez" -> "JP")
+    val inicialesAvatar = remember(nombreMostrar) {
+        val partes = nombreMostrar.trim().split("\\s+".toRegex())
+        if (partes.size >= 2 && partes[0].isNotBlank() && partes[1].isNotBlank()) {
+            "${partes[0].take(1)}${partes[1].take(1)}".uppercase()
+        } else if (partes.isNotEmpty() && partes[0].isNotBlank()) {
+            partes[0].take(1).uppercase()
+        } else {
+            "P"
+        }
+    }
+
     val fotoMostrar = interlocutorFotoUrl.takeIf { !it.isNullOrBlank() } ?: uiState.fotoContraparte
 
     // Estados de control de oferta y servicio
@@ -218,7 +246,7 @@ fun ChatDetailScreen(
                                 modifier = Modifier
                                     .size(42.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFCBD5E1)),
+                                    .background(Color(0xFFE2E8F0)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (fotoMostrar.isNotBlank()) {
@@ -229,11 +257,11 @@ fun ChatDetailScreen(
                                         modifier = Modifier.fillMaxSize()
                                     )
                                 } else {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Person,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(24.dp)
+                                    Text(
+                                        text = inicialesAvatar,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp,
+                                        color = colorTema
                                     )
                                 }
                             }
@@ -252,7 +280,7 @@ fun ChatDetailScreen(
                         Column {
                             Text(
                                 text = nombreMostrar,
-                                fontSize = 17.sp,
+                                fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF0F172A)
                             )
@@ -277,7 +305,6 @@ fun ChatDetailScreen(
 
                 HorizontalDivider(color = Color(0xFFF1F5F9))
 
-                // BANNER DE ESTADO DEL SERVICIO / OFERTA ACEPTADA
                 if (cotizacionAceptada && !servicioCompletado) {
                     Surface(
                         color = Color(0xFFDCFCE7),
@@ -345,7 +372,6 @@ fun ChatDetailScreen(
                     }
                 }
 
-                // FRANJA QUE MUESTRA LA SOLICITUD (SOLO VISIBLE PARA EL PRESTADOR Y TOCABLE)
                 if (!esCliente && !solicitudInfo.isNullOrEmpty()) {
                     Surface(
                         color = Color(0xFFFFF3E0),
@@ -495,7 +521,6 @@ fun ChatDetailScreen(
                             )
                         }
 
-                        // EL BOTÓN DE ENVIAR OFERTA SOLO APARECE SI LA OFERTA NO HA SIDO ACEPTADA
                         if (!esCliente && !cotizacionAceptada && !servicioCompletado) {
                             IconButton(onClick = { showOfertaDialog = true }) {
                                 Icon(

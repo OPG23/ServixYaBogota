@@ -164,15 +164,26 @@ class ChatViewModel : ViewModel() {
             }
     }
 
-    // 3. CARGAR PERFIL DE LA CONTRAPARTE (NOMBRE Y FOTO)
+    // 3. CARGAR PERFIL DE LA CONTRAPARTE (NOMBRE, APELLIDO Y FOTO)
     private fun cargarDatosContraparte(userId: String) {
         db.collection("usuarios").document(userId).get()
             .addOnSuccessListener { doc ->
                 if (doc.exists()) {
-                    val nombre = doc.getString("nombre") ?: doc.getString("nombreCompleto") ?: "Usuario"
+                    val nombre = doc.getString("nombre") ?: ""
+                    val apellido = doc.getString("apellido") ?: ""
+                    val nombreCompletoDoc = doc.getString("nombreCompleto") ?: ""
+
+                    val nombreFinal = when {
+                        nombre.isNotBlank() && apellido.isNotBlank() -> "$nombre $apellido"
+                        nombreCompletoDoc.isNotBlank() -> nombreCompletoDoc
+                        nombre.isNotBlank() -> nombre
+                        else -> "Usuario"
+                    }
+
                     val foto = doc.getString("fotoUrl") ?: doc.getString("fotoPerfil") ?: ""
+
                     _uiState.value = _uiState.value.copy(
-                        nombreContraparte = nombre,
+                        nombreContraparte = nombreFinal.trim(),
                         fotoContraparte = foto
                     )
                 }
@@ -321,7 +332,6 @@ class ChatViewModel : ViewModel() {
     fun enviarOferta(monto: Double, descripcion: String) {
         if (chatIdActual.isBlank() || currentUserIdActual.isBlank() || monto <= 0) return
 
-        // Bloqueo de seguridad adicional en el ViewModel
         if (_uiState.value.estadoPropuesta == "ACEPTADA") return
 
         val coleccionPadre = if (esChatDirecto) "chats" else "solicitudes"

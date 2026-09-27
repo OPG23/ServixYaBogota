@@ -45,7 +45,9 @@ fun ChatScreen(
     var mensajeTexto by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
-    // CORRECCIÓN: Se pasó 'chatId = solicitudId' a la función del ViewModel
+    // Nombre por defecto según el rol en caso de estar cargando
+    val nombrePorDefecto = if (esCliente) "Prestador" else "Cliente"
+
     LaunchedEffect(solicitudId, currentUserId, esCliente) {
         viewModel.inicializarChat(
             chatId = solicitudId,
@@ -106,7 +108,8 @@ fun ChatScreen(
                                             contentAlignment = Alignment.Center,
                                             modifier = Modifier.fillMaxSize()
                                         ) {
-                                            val inicial = uiState.nombreContraparte.trim().take(1).uppercase().ifBlank { "C" }
+                                            val nombreAMostrar = uiState.nombreContraparte.ifBlank { nombrePorDefecto }
+                                            val inicial = nombreAMostrar.trim().take(1).uppercase()
                                             Text(
                                                 text = inicial,
                                                 fontWeight = FontWeight.Bold,
@@ -131,7 +134,7 @@ fun ChatScreen(
 
                             Column {
                                 Text(
-                                    text = uiState.nombreContraparte.ifBlank { "Carlos Pérez" },
+                                    text = uiState.nombreContraparte.ifBlank { nombrePorDefecto },
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF111827)
@@ -172,7 +175,7 @@ fun ChatScreen(
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = "Solicitud - ${categoriaSolicitud.ifBlank { "Plomería" }}",
+                            text = "Solicitud - ${categoriaSolicitud.ifBlank { "General" }}",
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
                             color = Color(0xFF0D47A1)
