@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -52,6 +53,7 @@ fun ClientDirectChatsScreen(
     onOpenChat: (chatId: String, providerName: String, providerId: String) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf("Todas") }
     var realChats by remember { mutableStateOf<List<DirectChatUi>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
 
@@ -85,7 +87,6 @@ fun ClientDirectChatsScreen(
                                 val horaFormateada = formatearFecha(timestamp)
 
                                 if (prestadorId.isNotBlank()) {
-                                    // Obtener la información del prestador
                                     db.collection("usuarios").document(prestadorId).get()
                                         .addOnSuccessListener { providerDoc ->
                                             val nombrePrestador = providerDoc.getString("nombreCompleto")
@@ -145,12 +146,18 @@ fun ClientDirectChatsScreen(
         }
     }
 
-    // Filtrado en tiempo real según el buscador
-    val chatsFiltrados = remember(searchQuery, realChats) {
-        if (searchQuery.isBlank()) realChats
-        else realChats.filter {
-            it.providerName.contains(searchQuery, ignoreCase = true) ||
-                    it.category.contains(searchQuery, ignoreCase = true)
+    // Filtrado en tiempo real según el buscador y la categoría seleccionada
+    val chatsFiltrados = remember(searchQuery, selectedCategory, realChats) {
+        realChats.filter { chat ->
+            val coincideBusqueda = searchQuery.isBlank() ||
+                    chat.providerName.contains(searchQuery, ignoreCase = true) ||
+                    chat.category.contains(searchQuery, ignoreCase = true)
+
+            val coincideCategoria = selectedCategory == "Todas" ||
+                    chat.category.contains(selectedCategory, ignoreCase = true) ||
+                    selectedCategory.contains(chat.category, ignoreCase = true)
+
+            coincideBusqueda && coincideCategoria
         }
     }
 
@@ -191,7 +198,7 @@ fun ClientDirectChatsScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Buscador
+            // 1. Buscador
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
@@ -207,9 +214,17 @@ fun ClientDirectChatsScreen(
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
+            // 2. Barra de Filtro de Categorías
+            CategoryFilterChips(
+                selectedCategory = selectedCategory,
+                onCategorySelected = { selectedCategory = it },
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+
+            // 3. Contenido Principal
             if (isLoading) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -225,7 +240,11 @@ fun ClientDirectChatsScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = if (searchQuery.isBlank()) "No tienes conversaciones directas activas." else "No se encontraron conversaciones.",
+                        text = if (searchQuery.isBlank() && selectedCategory == "Todas") {
+                            "No tienes conversaciones directas activas."
+                        } else {
+                            "No se encontraron conversaciones con el filtro seleccionado."
+                        },
                         color = Color(0xFF64748B),
                         fontSize = 14.sp
                     )
@@ -241,6 +260,63 @@ fun ClientDirectChatsScreen(
                             onClick = { onOpenChat(chat.id, chat.providerName, chat.providerId) }
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+// ==========================================
+// COMPOSABLE: BARRA DE FILTROS DE CATEGORÍA
+// ==========================================
+
+@Composable
+fun CategoryFilterChips(
+    selectedCategory: String,
+    onCategorySelected: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val categories = listOf(
+        "Todas" to "✨",
+        "Plomería" to "🪠",
+        "Electricidad" to "⚡",
+        "Cerrajería" to "🔑",
+        "Pintura" to "🎨",
+        "Aseo y Limpieza" to "🧹",
+        "Reparación de Electrodomésticos" to "🔌",
+        "Carpintería" to "🪚"
+    )
+
+    LazyRow(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp)
+    ) {
+        items(categories) { (nombre, emoji) ->
+            val isSelected = selectedCategory == nombre
+
+            Surface(
+                onClick = { onCategorySelected(nombre) },
+                shape = RoundedCornerShape(20.dp),
+                color = if (isSelected) Color(0xFF2563EB) else Color.White,
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = if (isSelected) Color(0xFF2563EB) else Color(0xFFE2E8F0)
+                ),
+                shadowElevation = if (isSelected) 1.dp else 0.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(text = emoji, fontSize = 13.sp)
+                    Text(
+                        text = nombre,
+                        fontSize = 13.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSelected) Color.White else Color(0xFF334155)
+                    )
                 }
             }
         }
