@@ -288,7 +288,9 @@ fun ChatScreen(
                             esMio = esMio,
                             esCliente = esCliente,
                             estadoPropuesta = uiState.estadoPropuesta,
-                            onConfirmarServicio = { viewModel.aceptarPropuesta() }
+                            onConfirmarServicio = {
+                                viewModel.responderOferta(mensaje.id, true)
+                            }
                         )
                     }
                 }

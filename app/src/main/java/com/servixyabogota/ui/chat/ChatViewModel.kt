@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
@@ -15,9 +16,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Date
 
-// ==========================================
-// MODELOS DE DATOS DEL CHAT
-// ==========================================
 data class MensajeChat(
     val id: String = "",
     val emisorId: String = "",
@@ -26,13 +24,9 @@ data class MensajeChat(
     val mediaUrl: String? = null,
     val imagenUrl: String = "",
     val esVideo: Boolean = false,
-
-    // Nuevos campos
     val esOferta: Boolean = false,
     val montoOferta: Double = 0.0,
     val estadoOferta: String = "PENDIENTE",
-
-    // Aliases para compatibilidad con código anterior
     val esPropuesta: Boolean = esOferta,
     val montoPropuesta: Double = montoOferta,
     val leido: Boolean = false
@@ -41,8 +35,8 @@ data class MensajeChat(
 data class ChatUiState(
     val mensajes: List<MensajeChat> = emptyList(),
     val propuestaMonto: Double = 0.0,
-    val estadoPropuesta: String = "SIN_PROPUESTA", // SIN_PROPUESTA, PENDIENTE, ACEPTADA, RECHAZADA
-    val estadoSolicitud: String = "", // PENDIENTE, EN_PROCESO, COMPLETADO, etc.
+    val estadoPropuesta: String = "SIN_PROPUESTA",
+    val estadoSolicitud: String = "",
     val idContraparte: String = "",
     val nombreContraparte: String = "",
     val fotoContraparte: String = "",
@@ -66,9 +60,6 @@ class ChatViewModel : ViewModel() {
     private var currentUserIdActual: String = ""
     private var esChatDirecto: Boolean = false
 
-    /**
-     * Inicializa los escuchadores en tiempo real de Firestore.
-     */
     fun inicializarChat(chatId: String, currentUserId: String, esCliente: Boolean) {
         if (chatIdActual == chatId && currentUserIdActual == currentUserId && _uiState.value.mensajes.isNotEmpty()) {
             return
@@ -94,7 +85,6 @@ class ChatViewModel : ViewModel() {
         escucharMensajesEnVivo(chatId)
     }
 
-    // 1. ESCUCHAR SOLICITUD DE SERVICIO (CHAT VINCULADO A SOLICITUD)
     private fun escucharSolicitudChat(solicitudId: String, currentUserId: String, esCliente: Boolean) {
         documentoListener = db.collection("solicitudes").document(solicitudId)
             .addSnapshotListener { snapshot, error ->
@@ -134,7 +124,6 @@ class ChatViewModel : ViewModel() {
             }
     }
 
-    // 2. ESCUCHAR CHAT DIRECTO ENTRE USUARIOS
     private fun escucharChatDirecto(chatId: String, currentUserId: String, esCliente: Boolean) {
         documentoListener = db.collection("chats").document(chatId)
             .addSnapshotListener { snapshot, error ->
@@ -164,7 +153,6 @@ class ChatViewModel : ViewModel() {
             }
     }
 
-    // 3. CARGAR PERFIL DE LA CONTRAPARTE (NOMBRE, APELLIDO Y FOTO)
     private fun cargarDatosContraparte(userId: String) {
         db.collection("usuarios").document(userId).get()
             .addOnSuccessListener { doc ->
@@ -190,7 +178,6 @@ class ChatViewModel : ViewModel() {
             }
     }
 
-    // 4. LISTENER DE MENSAJES EN TIEMPO REAL
     private fun escucharMensajesEnVivo(chatId: String) {
         val coleccionPadre = if (esChatDirecto) "chats" else "solicitudes"
 
@@ -205,6 +192,8 @@ class ChatViewModel : ViewModel() {
                 }
 
                 if (snapshot != null) {
+                    val mensajesSinLeerList = mutableListOf<String>()
+
                     val listaMensajes = snapshot.documents.mapNotNull { doc ->
                         val emisorId = doc.getString("emisorId") ?: ""
                         val texto = doc.getString("texto") ?: ""
@@ -216,6 +205,11 @@ class ChatViewModel : ViewModel() {
                         val esOferta = doc.getBoolean("esOferta") ?: doc.getBoolean("esPropuesta") ?: false
                         val montoOferta = doc.getDouble("montoOferta") ?: doc.getDouble("montoPropuesta") ?: 0.0
                         val estadoOferta = doc.getString("estadoOferta") ?: "PENDIENTE"
+                        val leido = doc.getBoolean("leido") ?: false
+
+                        if (!leido && emisorId != currentUserIdActual && emisorId.isNotBlank()) {
+                            mensajesSinLeerList.add(doc.id)
+                        }
 
                         MensajeChat(
                             id = doc.id,
@@ -230,7 +224,7 @@ class ChatViewModel : ViewModel() {
                             estadoOferta = estadoOferta,
                             esPropuesta = esOferta,
                             montoPropuesta = montoOferta,
-                            leido = doc.getBoolean("leido") ?: false
+                            leido = leido
                         )
                     }
 
@@ -238,11 +232,35 @@ class ChatViewModel : ViewModel() {
                         mensajes = listaMensajes,
                         isLoading = false
                     )
+
+                    if (mensajesSinLeerList.isNotEmpty()) {
+                        marcarMensajesComoLeidos(mensajesSinLeerList)
+                    }
                 }
             }
     }
 
-    // 5. ENVIAR MENSAJE DE TEXTO O MULTIMEDIA
+    private fun marcarMensajesComoLeidos(idsMensajes: List<String>) {
+        if (chatIdActual.isBlank()) return
+
+        val coleccionPadre = if (esChatDirecto) "chats" else "solicitudes"
+        val batch = db.batch()
+
+        idsMensajes.forEach { msgId ->
+            val refMsg = db.collection(coleccionPadre)
+                .document(chatIdActual)
+                .collection("mensajes")
+                .document(msgId)
+            batch.update(refMsg, "leido", true)
+        }
+
+        val campoNoLeidos = if (_uiState.value.esCliente) "noLeidosCliente" else "noLeidosPrestador"
+        val refChat = db.collection(coleccionPadre).document(chatIdActual)
+        batch.set(refChat, mapOf(campoNoLeidos to 0), SetOptions.merge())
+
+        batch.commit()
+    }
+
     fun enviarMensaje(
         texto: String,
         mediaUrl: String? = null,
@@ -261,7 +279,8 @@ class ChatViewModel : ViewModel() {
             "esVideo" to esVideo,
             "esOferta" to false,
             "montoOferta" to 0.0,
-            "estadoOferta" to "PENDIENTE"
+            "estadoOferta" to "PENDIENTE",
+            "leido" to false
         )
 
         val textoResumen = when {
@@ -269,6 +288,8 @@ class ChatViewModel : ViewModel() {
             esVideo -> "📹 Video"
             else -> "📷 Imagen"
         }
+
+        val campoNoLeidosDestinatario = if (_uiState.value.esCliente) "noLeidosPrestador" else "noLeidosCliente"
 
         db.collection(coleccionPadre)
             .document(chatIdActual)
@@ -278,7 +299,8 @@ class ChatViewModel : ViewModel() {
                 val datosUltimoMensaje = mapOf(
                     "ultimoMensaje" to textoResumen,
                     "fechaUltimoMensaje" to Timestamp.now(),
-                    "ultimoEmisorId" to currentUserIdActual
+                    "ultimoEmisorId" to currentUserIdActual,
+                    campoNoLeidosDestinatario to FieldValue.increment(1)
                 )
 
                 db.collection(coleccionPadre)
@@ -287,7 +309,6 @@ class ChatViewModel : ViewModel() {
             }
     }
 
-    // 6. ENVIAR MULTIMEDIA (FOTO O VIDEO)
     fun enviarMensajeConMedia(texto: String, mediaUri: Uri, context: Context) {
         if (chatIdActual.isBlank() || currentUserIdActual.isBlank()) return
 
@@ -328,7 +349,6 @@ class ChatViewModel : ViewModel() {
             }
     }
 
-    // 7. ENVIAR OFERTA / COTIZACIÓN DE SERVICIO (PRESTADOR)
     fun enviarOferta(monto: Double, descripcion: String) {
         if (chatIdActual.isBlank() || currentUserIdActual.isBlank() || monto <= 0) return
 
@@ -350,16 +370,20 @@ class ChatViewModel : ViewModel() {
             "esVideo" to false,
             "esOferta" to true,
             "montoOferta" to monto,
-            "estadoOferta" to "PENDIENTE"
+            "estadoOferta" to "PENDIENTE",
+            "leido" to false
         )
 
         val batch = db.batch()
         batch.set(refMensaje, mensajeOferta)
 
+        val campoNoLeidosDestinatario = if (_uiState.value.esCliente) "noLeidosPrestador" else "noLeidosCliente"
+
         val datosUltimoMensaje = mutableMapOf<String, Any>(
             "ultimoMensaje" to "Oferta de servicio: $$monto",
             "fechaUltimoMensaje" to Timestamp.now(),
-            "ultimoEmisorId" to currentUserIdActual
+            "ultimoEmisorId" to currentUserIdActual,
+            campoNoLeidosDestinatario to FieldValue.increment(1)
         )
 
         if (!esChatDirecto) {
@@ -371,7 +395,6 @@ class ChatViewModel : ViewModel() {
         batch.commit()
     }
 
-    // 8. ACEPTAR O RECHAZAR OFERTA (CLIENTE)
     fun responderOferta(mensajeId: String, aceptada: Boolean) {
         if (chatIdActual.isBlank() || mensajeId.isBlank()) return
 
@@ -403,7 +426,6 @@ class ChatViewModel : ViewModel() {
         batch.commit()
     }
 
-    // 9. COMPLETAR SERVICIO (CLIENTE)
     fun completarServicio(onSuccess: () -> Unit = {}, onError: (String) -> Unit = {}) {
         if (chatIdActual.isBlank() || esChatDirecto) return
 
@@ -428,27 +450,5 @@ class ChatViewModel : ViewModel() {
     override fun onCleared() {
         super.onCleared()
         detenerListeners()
-    }
-
-    // FUNCIONES DE COMPATIBILIDAD CON CÓDIGO ANTERIOR
-    fun aceptarPropuesta() {
-        if (chatIdActual.isBlank() || esChatDirecto) return
-
-        db.collection("solicitudes")
-            .document(chatIdActual)
-            .update(
-                mapOf(
-                    "estadoPropuesta" to "ACEPTADA",
-                    "estado" to "EN_PROCESO"
-                )
-            )
-    }
-
-    fun rechazarPropuesta() {
-        if (chatIdActual.isBlank() || esChatDirecto) return
-
-        db.collection("solicitudes")
-            .document(chatIdActual)
-            .update("estadoPropuesta", "RECHAZADA")
     }
 }

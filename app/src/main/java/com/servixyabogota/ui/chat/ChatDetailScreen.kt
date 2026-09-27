@@ -7,6 +7,9 @@ import android.widget.VideoView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,6 +24,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
@@ -39,7 +43,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -93,7 +96,7 @@ fun ChatDetailScreen(
                 it.statSize
             } ?: 0L
 
-            val maximoPermitido = 5 * 1024 * 1024 // 5 MB
+            val maximoPermitido = 5 * 1024 * 1024
 
             if (tamanoEnBytes > maximoPermitido) {
                 Toast.makeText(context, "El archivo supera el límite de 5 MB.", Toast.LENGTH_LONG).show()
@@ -115,7 +118,6 @@ fun ChatDetailScreen(
 
     val uiState by viewModel.uiState.collectAsState()
 
-    // Construcción y resolución del Nombre y Apellido Completo
     val nombreApellidoParametro = remember(interlocutorNombre, interlocutorApellido) {
         "$interlocutorNombre $interlocutorApellido".trim()
     }
@@ -129,7 +131,6 @@ fun ChatDetailScreen(
         }
     }
 
-    // Cálculo de iniciales para el Avatar (ej. "Juan Pérez" -> "JP")
     val inicialesAvatar = remember(nombreMostrar) {
         val partes = nombreMostrar.trim().split("\\s+".toRegex())
         if (partes.size >= 2 && partes[0].isNotBlank() && partes[1].isNotBlank()) {
@@ -143,16 +144,33 @@ fun ChatDetailScreen(
 
     val fotoMostrar = interlocutorFotoUrl.takeIf { !it.isNullOrBlank() } ?: uiState.fotoContraparte
 
-    // Estados de control de oferta y servicio
     val cotizacionAceptada = uiState.estadoPropuesta == "ACEPTADA" || uiState.mensajes.any { it.esOferta && it.estadoOferta == "ACEPTADA" }
     val servicioCompletado = uiState.estadoSolicitud == "COMPLETADO" || uiState.estadoSolicitud == "FINALIZADO"
 
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
+    var mostrarBotonNuevosMensajes by remember { mutableStateOf(false) }
+
+    val estaAlFinal = remember {
+        derivedStateOf {
+            val totalItems = listState.layoutInfo.totalItemsCount
+            if (totalItems == 0) true
+            else {
+                val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                lastVisibleIndex >= totalItems - 2
+            }
+        }
+    }
+
     LaunchedEffect(uiState.mensajes.size) {
         if (uiState.mensajes.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.mensajes.size - 1)
+            if (estaAlFinal.value) {
+                listState.animateScrollToItem(uiState.mensajes.size - 1)
+                mostrarBotonNuevosMensajes = false
+            } else {
+                mostrarBotonNuevosMensajes = true
+            }
         }
     }
 
@@ -293,7 +311,7 @@ fun ChatDetailScreen(
                         }
                     }
 
-                    IconButton(onClick = { /* Llamada opcional */ }) {
+                    IconButton(onClick = { }) {
                         Icon(
                             imageVector = Icons.Outlined.Phone,
                             contentDescription = "Llamar",
@@ -638,6 +656,54 @@ fun ChatDetailScreen(
                     }
                 }
             }
+
+            AnimatedVisibility(
+                visible = mostrarBotonNuevosMensajes,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 12.dp)
+            ) {
+                Surface(
+                    onClick = {
+                        coroutineScope.launch {
+                            if (uiState.mensajes.isNotEmpty()) {
+                                listState.animateScrollToItem(uiState.mensajes.size - 1)
+                            }
+                            mostrarBotonNuevosMensajes = false
+                        }
+                    },
+                    shape = RoundedCornerShape(20.dp),
+                    color = colorTema,
+                    shadowElevation = 6.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF22C55E))
+                        )
+                        Text(
+                            text = "Nuevos mensajes",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Icon(
+                            imageVector = Icons.Default.ArrowDownward,
+                            contentDescription = "Ir abajo",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -759,10 +825,11 @@ fun ChatBubbleFirebase(
             )
 
             if (isFromMe) {
+                val colorCheck = if (mensaje.leido) Color(0xFF38BDF8) else Color(0xFF94A3B8)
                 Icon(
                     imageVector = Icons.Filled.DoneAll,
-                    contentDescription = "Enviado",
-                    tint = colorTema,
+                    contentDescription = if (mensaje.leido) "Leído" else "Enviado",
+                    tint = colorCheck,
                     modifier = Modifier.size(16.dp)
                 )
             }
@@ -770,12 +837,9 @@ fun ChatBubbleFirebase(
     }
 }
 
-private data class EstadoOfertaUI(
-    val texto: String,
-    val bg: Color,
-    val fg: Color,
-    val icono: ImageVector
-)
+// ==========================================
+// COMPONENTES AUXILIARES DEL CHAT
+// ==========================================
 
 @Composable
 fun OfertaCard(
@@ -786,144 +850,154 @@ fun OfertaCard(
     onResponderOferta: (aceptada: Boolean) -> Unit
 ) {
     val formatoMoneda = remember { NumberFormat.getCurrencyInstance(Locale("es", "CO")) }
-    val montoFormateado = formatoMoneda.format(mensaje.montoOferta)
-
-    val estadoUI = when (mensaje.estadoOferta) {
-        "ACEPTADA" -> EstadoOfertaUI("Aceptada", Color(0xFFDCFCE7), Color(0xFF15803D), Icons.Default.CheckCircle)
-        "RECHAZADA" -> EstadoOfertaUI("Rechazada", Color(0xFFFEE2E2), Color(0xFFB91C1C), Icons.Default.Cancel)
-        else -> EstadoOfertaUI("Pendiente", Color(0xFFFEF3C7), Color(0xFFB45309), Icons.Default.HourglassTop)
+    val montoFormateado = remember(mensaje.montoOferta) {
+        try {
+            formatoMoneda.format(mensaje.montoOferta)
+        } catch (e: Exception) {
+            "$${mensaje.montoOferta}"
+        }
     }
 
-    val borderColor = when (mensaje.estadoOferta) {
-        "ACEPTADA" -> Color(0xFF22C55E).copy(alpha = 0.4f)
-        "RECHAZADA" -> Color(0xFFEF4444).copy(alpha = 0.3f)
-        else -> Color(0xFFE2E8F0)
-    }
+    val estado = mensaje.estadoOferta
 
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-        modifier = Modifier
-            .width(285.dp)
-            .border(1.5.dp, borderColor, RoundedCornerShape(20.dp))
+    Surface(
+        color = when (estado) {
+            "ACEPTADA" -> Color(0xFFF0FDF4)
+            "RECHAZADA" -> Color(0xFFFEF2F2)
+            else -> Color(0xFFFFFBEB)
+        },
+        border = BorderStroke(
+            1.dp,
+            when (estado) {
+                "ACEPTADA" -> Color(0xFF86EFAC)
+                "RECHAZADA" -> Color(0xFFFCA5A5)
+                else -> Color(0xFDFCD34D)
+            }
+        ),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.widthIn(max = 280.dp)
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        when (mensaje.estadoOferta) {
-                            "ACEPTADA" -> Color(0xFFF0FDF4)
-                            "RECHAZADA" -> Color(0xFFFFF1F2)
-                            else -> Color(0xFFF8FAFC)
-                        }
-                    )
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                Icon(
+                    imageVector = Icons.Default.LocalOffer,
+                    contentDescription = null,
+                    tint = when (estado) {
+                        "ACEPTADA" -> Color(0xFF16A34A)
+                        "RECHAZADA" -> Color(0xFFDC2626)
+                        else -> Color(0xFFD97706)
+                    },
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = "Oferta de servicio",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF334155)
+                )
+            }
+
+            Text(
+                text = montoFormateado,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color(0xFF0F172A)
+            )
+
+            if (mensaje.texto.isNotBlank() && mensaje.texto != "Oferta de servicio enviada") {
+                Text(
+                    text = mensaje.texto,
+                    fontSize = 13.sp,
+                    color = Color(0xFF475569)
+                )
+            }
+
+            when (estado) {
+                "ACEPTADA" -> {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .background(colorTema.copy(alpha = 0.12f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.LocalOffer,
-                                contentDescription = null,
-                                tint = colorTema,
-                                modifier = Modifier.size(15.dp)
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF16A34A),
+                            modifier = Modifier.size(16.dp)
+                        )
                         Text(
-                            text = "COTIZACIÓN",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF475569),
-                            letterSpacing = 0.5.sp
+                            text = "Oferta Aceptada",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF16A34A)
                         )
                     }
-
-                    Surface(
-                        color = estadoUI.bg,
-                        shape = RoundedCornerShape(50)
+                }
+                "RECHAZADA" -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
+                        Icon(
+                            imageVector = Icons.Default.Cancel,
+                            contentDescription = null,
+                            tint = Color(0xFFDC2626),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "Oferta Rechazada",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFDC2626)
+                        )
+                    }
+                }
+                else -> {
+                    if (!isFromMe && esCliente) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { onResponderOferta(false) },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+                                border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                                contentPadding = PaddingValues(vertical = 4.dp, horizontal = 8.dp)
+                            ) {
+                                Text("Rechazar", fontSize = 12.sp)
+                            }
+                            Button(
+                                onClick = { onResponderOferta(true) },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                                contentPadding = PaddingValues(vertical = 4.dp, horizontal = 8.dp)
+                            ) {
+                                Text("Aceptar", fontSize = 12.sp, color = Color.White)
+                            }
+                        }
+                    } else {
+                        Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Icon(
-                                imageVector = estadoUI.icono,
+                                imageVector = Icons.Default.HourglassTop,
                                 contentDescription = null,
-                                tint = estadoUI.fg,
-                                modifier = Modifier.size(12.dp)
+                                tint = Color(0xFFD97706),
+                                modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = estadoUI.texto,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = estadoUI.fg
+                                text = "Pendiente de respuesta",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFFD97706)
                             )
-                        }
-                    }
-                }
-            }
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = montoFormateado,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color(0xFF0F172A)
-                )
-
-                if (mensaje.texto.isNotBlank()) {
-                    Text(
-                        text = mensaje.texto,
-                        fontSize = 13.sp,
-                        color = Color(0xFF475569)
-                    )
-                }
-
-                if (esCliente && mensaje.estadoOferta == "PENDIENTE" && !isFromMe) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = { onResponderOferta(false) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
-                            border = BorderStroke(1.dp, Color(0xFFFCA5A5))
-                        ) {
-                            Text("Rechazar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-
-                        Button(
-                            onClick = { onResponderOferta(true) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A))
-                        ) {
-                            Text("Aceptar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -937,33 +1011,28 @@ fun CrearOfertaDialog(
     onDismiss: () -> Unit,
     onEnviar: (monto: Double, descripcion: String) -> Unit
 ) {
-    var montoText by remember { mutableStateOf("") }
-    var descText by remember { mutableStateOf("") }
+    var montoTexto by remember { mutableStateOf("") }
+    var descripcion by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "Enviar Cotización",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
-            )
-        },
+        title = { Text("Enviar Oferta de Servicio", fontWeight = FontWeight.Bold) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 OutlinedTextField(
-                    value = montoText,
-                    onValueChange = { montoText = it },
+                    value = montoTexto,
+                    onValueChange = { montoTexto = it },
                     label = { Text("Monto ($)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-
                 OutlinedTextField(
-                    value = descText,
-                    onValueChange = { descText = it },
-                    label = { Text("Descripción o detalles del trabajo") },
+                    value = descripcion,
+                    onValueChange = { descripcion = it },
+                    label = { Text("Descripción / Detalle (Opcional)") },
                     modifier = Modifier.fillMaxWidth(),
                     maxLines = 3
                 )
@@ -972,11 +1041,12 @@ fun CrearOfertaDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    val monto = montoText.toDoubleOrNull() ?: 0.0
+                    val monto = montoTexto.toDoubleOrNull() ?: 0.0
                     if (monto > 0) {
-                        onEnviar(monto, descText)
+                        onEnviar(monto, descripcion)
                     }
                 },
+                enabled = (montoTexto.toDoubleOrNull() ?: 0.0) > 0.0,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A))
             ) {
                 Text("Enviar Oferta", color = Color.White)
@@ -988,45 +1058,6 @@ fun CrearOfertaDialog(
             }
         }
     )
-}
-
-@Composable
-fun ImageViewerDialog(
-    imageUrl: String,
-    onDismiss: () -> Unit
-) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-        ) {
-            AsyncImage(
-                model = imageUrl,
-                contentDescription = "Vista previa",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit
-            )
-
-            IconButton(
-                onClick = onDismiss,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(16.dp)
-                    .statusBarsPadding()
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Cerrar",
-                    tint = Color.White,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-        }
-    }
 }
 
 @Composable
@@ -1044,16 +1075,18 @@ fun VideoPlayerDialog(
                 .background(Color.Black)
         ) {
             AndroidView(
-                factory = { ctx ->
-                    VideoView(ctx).apply {
+                factory = { context ->
+                    VideoView(context).apply {
                         setVideoPath(videoUrl)
-                        val mediaController = MediaController(ctx)
+                        val mediaController = MediaController(context)
                         mediaController.setAnchorView(this)
                         setMediaController(mediaController)
                         start()
                     }
                 },
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.Center)
             )
 
             IconButton(
@@ -1062,12 +1095,53 @@ fun VideoPlayerDialog(
                     .align(Alignment.TopEnd)
                     .padding(16.dp)
                     .statusBarsPadding()
+                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
             ) {
                 Icon(
                     imageVector = Icons.Default.Close,
                     contentDescription = "Cerrar",
-                    tint = Color.White,
-                    modifier = Modifier.size(28.dp)
+                    tint = Color.White
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ImageViewerDialog(
+    imageUrl: String,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.9f))
+                .clickable { onDismiss() },
+            contentAlignment = Alignment.Center
+        ) {
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = "Imagen ampliada",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp)
+                    .statusBarsPadding()
+                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Cerrar",
+                    tint = Color.White
                 )
             }
         }
