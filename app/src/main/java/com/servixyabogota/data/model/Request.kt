@@ -19,11 +19,16 @@ data class Solicitud(
     val estado: String = EstadoSolicitud.PENDIENTE,
     val prestadorIdAsignado: String? = null,
     val cantidadPropuestas: Int = 0,
+    val noLeidosCliente: Int = 0,
+    val noLeidosPrestador: Int = 0,
     @ServerTimestamp
     val fechaCreacion: Date? = null,
     @ServerTimestamp
     val fechaActualizacion: Date? = null
-)
+) {
+    val tieneMensajesNuevos: Boolean
+        get() = noLeidosCliente > 0
+}
 
 object EstadoSolicitud {
     const val PENDIENTE = "PENDIENTE"

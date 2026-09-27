@@ -170,6 +170,8 @@ private fun TarjetaSolicitudCliente(
     onVerPropuestasClick: () -> Unit,
     onVerChatClick: () -> Unit
 ) {
+    val esProceso = solicitud.estado.equals("EN_PROCESO", ignoreCase = true)
+
     Surface(
         color = Color.White,
         shape = RoundedCornerShape(16.dp),
@@ -198,7 +200,6 @@ private fun TarjetaSolicitudCliente(
                     )
                 }
 
-                val esProceso = solicitud.estado.equals("EN_PROCESO", ignoreCase = true)
                 Surface(
                     color = if (esProceso) Color(0xFFDCFCE7) else Color(0xFFEFF6FF),
                     shape = RoundedCornerShape(20.dp)
@@ -239,19 +240,45 @@ private fun TarjetaSolicitudCliente(
                     )
                 }
 
-                // Muestra la cantidad acumulada actual
-                val conteoPropuestas = solicitud.cantidadPropuestas
-                Text(
-                    text = "$conteoPropuestas ${if (conteoPropuestas == 1) "Prestador interesado" else "Prestadores interesados"}",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color(0xFF2563EB)
-                )
+                if (esProceso) {
+                    val tieneMensajesNuevos = solicitud.noLeidosCliente > 0
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(
+                                    if (tieneMensajesNuevos) Color(0xFF16A34A) else Color(0xFF94A3B8),
+                                    CircleShape
+                                )
+                        )
+                        Text(
+                            text = if (tieneMensajesNuevos) {
+                                if (solicitud.noLeidosCliente == 1) "1 mensaje nuevo" else "${solicitud.noLeidosCliente} mensajes nuevos"
+                            } else {
+                                "Sin mensajes nuevos"
+                            },
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (tieneMensajesNuevos) Color(0xFF16A34A) else Color(0xFF64748B)
+                        )
+                    }
+                } else {
+                    val conteoPropuestas = solicitud.cantidadPropuestas
+                    Text(
+                        text = "$conteoPropuestas ${if (conteoPropuestas == 1) "Prestador interesado" else "Prestadores interesados"}",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF2563EB)
+                    )
+                }
             }
 
             Button(
                 onClick = {
-                    if (solicitud.estado.equals("EN_PROCESO", ignoreCase = true)) {
+                    if (esProceso) {
                         onVerChatClick()
                     } else {
                         onVerPropuestasClick()
@@ -273,7 +300,7 @@ private fun TarjetaSolicitudCliente(
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        text = if (solicitud.estado.equals("EN_PROCESO", ignoreCase = true)) "Abrir Chat de Servicio" else "Ver Propuestas Recibidas",
+                        text = if (esProceso) "Abrir Chat de Servicio" else "Ver Propuestas Recibidas",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold
                     )
