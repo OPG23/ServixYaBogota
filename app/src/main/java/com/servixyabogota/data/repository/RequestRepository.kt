@@ -19,7 +19,6 @@ class SolicitudRepository {
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance()
     private val storageRef = FirebaseStorage.getInstance().reference
 
-    // Función auxiliar para obtener la extensión del archivo según su Uri
     private fun obtenerExtension(context: Context, uri: Uri): String {
         return context.contentResolver.getType(uri)?.let { mime ->
             MimeTypeMap.getSingleton().getExtensionFromMimeType(mime)
@@ -102,15 +101,16 @@ class SolicitudRepository {
     }
 
     /**
-     * Marca el servicio como COMPLETADO, registra la reseña/calificación y recalcula
-     * el promedio de estrellas del prestador en la base de datos.
+     * Marca el servicio como COMPLETADO, registra la reseña/calificación con el nombre del cliente
+     * y recalcula el promedio de estrellas del prestador en Firestore.
      */
     suspend fun completarServicioYCalificar(
         solicitudId: String,
         clienteId: String,
         prestadorId: String,
         calificacion: Int,
-        comentario: String
+        comentario: String,
+        clienteNombre: String = ""
     ): Result<Unit> = try {
         val batch = db.batch()
 
@@ -126,6 +126,7 @@ class SolicitudRepository {
         val nuevaResena = hashMapOf(
             "solicitudId" to solicitudId,
             "clienteId" to clienteId,
+            "clienteNombre" to clienteNombre,
             "prestadorId" to prestadorId,
             "calificacion" to calificacion,
             "comentario" to comentario,
@@ -144,25 +145,30 @@ class SolicitudRepository {
 
         val docs = resenasQuery.documents
         val totalResenas = docs.size
-        val suma = docs.sumOf { it.getLong("calificacion") ?: 5L }
-        val nuevoPromedio = if (totalResenas > 0) suma.toDouble() / totalResenas else 5.0
 
+        // Obtención segura de números (soporta Int, Long y Double)
+        val suma = docs.sumOf { doc ->
+            (doc.get("calificacion") as? Number)?.toDouble() ?: calificacion.toDouble()
+        }
+        val nuevoPromedio = if (totalResenas > 0) suma / totalResenas else 5.0
+
+        // Se actualizan todos los alias del campo para garantizar compatibilidad total
         db.collection("usuarios").document(prestadorId)
             .update(
                 mapOf(
                     "calificacion" to nuevoPromedio,
-                    "totalResenas" to totalResenas
+                    "promedioCalificacion" to nuevoPromedio,
+                    "rating" to nuevoPromedio,
+                    "totalResenas" to totalResenas,
+                    "numeroResenas" to totalResenas
                 )
             ).await()
 
         Result.success(Unit)
     } catch (e: Exception) {
+        android.util.Log.e("SolicitudRepository", "Error al completar y calificar: ${e.message}", e)
         Result.failure(e)
     }
-
-    // ==========================================
-    // FUNCIONES PARA PRESTADORES
-    // ==========================================
 
     private fun normalizarTexto(texto: String): String {
         return texto.replace(Regex("[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]"), "")

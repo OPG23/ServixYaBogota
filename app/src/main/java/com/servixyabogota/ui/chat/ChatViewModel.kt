@@ -444,6 +444,9 @@ class ChatViewModel : ViewModel() {
     /**
      * Completa el servicio y registra la calificación y opinión del prestador en Firebase.
      */
+    /**
+     * Completa el servicio y registra la calificación y opinión del prestador en Firebase.
+     */
     fun completarServicioYCalificar(
         calificacion: Int,
         comentario: String,
@@ -458,27 +461,41 @@ class ChatViewModel : ViewModel() {
             return
         }
 
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
-            val result = solicitudRepository.completarServicioYCalificar(
-                solicitudId = chatIdActual,
-                clienteId = currentUserIdActual,
-                prestadorId = prestadorId,
-                calificacion = calificacion,
-                comentario = comentario
-            )
-            _uiState.value = _uiState.value.copy(isLoading = false)
+        _uiState.value = _uiState.value.copy(isLoading = true)
 
-            result.fold(
-                onSuccess = {
-                    enviarMensaje("🎉 El cliente ha completado el servicio y ha dejado una evaluación de $calificacion ★.")
-                    onSuccess()
-                },
-                onFailure = { error ->
-                    onError(error.message ?: "Error al completar y calificar el servicio")
+        // Consultar primero el nombre del cliente para guardarlo en la reseña
+        db.collection("usuarios").document(currentUserIdActual).get()
+            .addOnSuccessListener { docCliente ->
+                val nombreCliente = docCliente.getString("nombreCompleto")
+                    ?: docCliente.getString("nombre")
+                    ?: "Cliente ServixYa"
+
+                viewModelScope.launch {
+                    val result = solicitudRepository.completarServicioYCalificar(
+                        solicitudId = chatIdActual,
+                        clienteId = currentUserIdActual,
+                        prestadorId = prestadorId,
+                        calificacion = calificacion,
+                        comentario = comentario,
+                        clienteNombre = nombreCliente
+                    )
+                    _uiState.value = _uiState.value.copy(isLoading = false)
+
+                    result.fold(
+                        onSuccess = {
+                            enviarMensaje("🎉 El cliente ha completado el servicio y ha dejado una evaluación de $calificacion ★.")
+                            onSuccess()
+                        },
+                        onFailure = { error ->
+                            onError(error.message ?: "Error al completar y calificar el servicio")
+                        }
+                    )
                 }
-            )
-        }
+            }
+            .addOnFailureListener {
+                _uiState.value = _uiState.value.copy(isLoading = false)
+                onError("Error al obtener datos del cliente")
+            }
     }
 
     private fun detenerListeners() {
