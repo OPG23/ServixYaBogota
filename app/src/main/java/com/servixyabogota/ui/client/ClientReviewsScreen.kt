@@ -27,7 +27,6 @@ import com.google.firebase.firestore.FirebaseFirestore
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-
 @Composable
 fun ClientReviewsScreen(
     onBack: () -> Unit = {}
