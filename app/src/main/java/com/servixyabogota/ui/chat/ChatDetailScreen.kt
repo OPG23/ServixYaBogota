@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Phone
@@ -77,7 +78,7 @@ fun ChatDetailScreen(
     var messageText by remember { mutableStateOf("") }
     var selectedMediaUri by remember { mutableStateOf<Uri?>(null) }
     var showOfertaDialog by remember { mutableStateOf(false) }
-    var showConfirmCompletarDialog by remember { mutableStateOf(false) }
+    var showCalificarDialog by remember { mutableStateOf(false) }
 
     var previewMediaUrl by remember { mutableStateOf<String?>(null) }
     var previewIsVideo by remember { mutableStateOf(false) }
@@ -141,7 +142,7 @@ fun ChatDetailScreen(
     val fotoMostrar = interlocutorFotoUrl.takeIf { !it.isNullOrBlank() } ?: uiState.fotoContraparte
 
     val cotizacionAceptada = uiState.estadoPropuesta == "ACEPTADA" || uiState.mensajes.any { it.esOferta && it.estadoOferta == "ACEPTADA" }
-    val servicioCompletado = uiState.estadoSolicitud == "COMPLETADO" || uiState.estadoSolicitud == "FINALIZADO"
+    val servicioCompletado = uiState.estadoSolicitud == "COMPLETADO" || uiState.estadoSolicitud == "COMPLETADA" || uiState.estadoSolicitud == "FINALIZADO"
 
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
@@ -149,7 +150,6 @@ fun ChatDetailScreen(
     var isPrimeraCarga by remember(chatId, currentUserId) { mutableStateOf(true) }
     var mensajesConocidosIds by remember(chatId, currentUserId) { mutableStateOf(setOf<String>()) }
 
-    // Control de desplazamiento automático sin banner
     LaunchedEffect(uiState.mensajes, uiState.isLoading) {
         if (uiState.isLoading) return@LaunchedEffect
 
@@ -181,33 +181,21 @@ fun ChatDetailScreen(
         )
     }
 
-    if (showConfirmCompletarDialog) {
-        AlertDialog(
-            onDismissRequest = { showConfirmCompletarDialog = false },
-            title = { Text("Completar Servicio", fontWeight = FontWeight.Bold) },
-            text = { Text("¿Confirmas que el servicio ha sido realizado satisfactoriamente?") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showConfirmCompletarDialog = false
-                        viewModel.completarServicio(
-                            onSuccess = {
-                                Toast.makeText(context, "¡Servicio completado!", Toast.LENGTH_SHORT).show()
-                            },
-                            onError = { err ->
-                                Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
-                            }
-                        )
+    if (showCalificarDialog) {
+        CalificarServicioDialog(
+            onDismiss = { showCalificarDialog = false },
+            onEnviar = { calificacion, comentario ->
+                showCalificarDialog = false
+                viewModel.completarServicioYCalificar(
+                    calificacion = calificacion,
+                    comentario = comentario,
+                    onSuccess = {
+                        Toast.makeText(context, "¡Servicio completado y calificado!", Toast.LENGTH_SHORT).show()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A))
-                ) {
-                    Text("Sí, Completar", color = Color.White)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showConfirmCompletarDialog = false }) {
-                    Text("Cancelar")
-                }
+                    onError = { err ->
+                        Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                    }
+                )
             }
         )
     }
@@ -348,7 +336,7 @@ fun ChatDetailScreen(
 
                             if (esCliente) {
                                 Button(
-                                    onClick = { showConfirmCompletarDialog = true },
+                                    onClick = { showCalificarDialog = true },
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
                                     shape = RoundedCornerShape(8.dp),
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
@@ -949,6 +937,82 @@ fun OfertaCard(
             }
         }
     }
+}
+
+@Composable
+fun CalificarServicioDialog(
+    onDismiss: () -> Unit,
+    onEnviar: (calificacion: Int, comentario: String) -> Unit
+) {
+    var calificacion by remember { mutableIntStateOf(5) }
+    var comentario by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Completar y Calificar Servicio",
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp
+            )
+        },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "¿Cómo calificas el trabajo realizado por el prestador?",
+                    fontSize = 14.sp,
+                    color = Color(0xFF475569)
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    (1..5).forEach { star ->
+                        Icon(
+                            imageVector = Icons.Default.Star,
+                            contentDescription = "Estrella $star",
+                            tint = if (star <= calificacion) Color(0xFFF59E0B) else Color(0xFFCBD5E1),
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clickable { calificacion = star }
+                                .padding(2.dp)
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = comentario,
+                    onValueChange = { comentario = it },
+                    label = { Text("Comentario / Opinión") },
+                    placeholder = { Text("Escribe una reseña sobre el servicio...") },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 4,
+                    minLines = 2,
+                    shape = RoundedCornerShape(12.dp)
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onEnviar(calificacion, comentario) },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Completar y Calificar", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar", color = Color(0xFF64748B))
+            }
+        }
+    )
 }
 
 @Composable

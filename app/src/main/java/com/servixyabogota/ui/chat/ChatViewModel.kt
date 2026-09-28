@@ -3,6 +3,7 @@ package com.servixyabogota.ui.chat
 import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -11,9 +12,11 @@ import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.storage.StorageMetadata
+import com.servixyabogota.data.repository.SolicitudRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.util.Date
 
 data class MensajeChat(
@@ -49,6 +52,7 @@ data class ChatUiState(
 class ChatViewModel : ViewModel() {
 
     private val db = FirebaseFirestore.getInstance()
+    private val solicitudRepository = SolicitudRepository()
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
@@ -175,7 +179,6 @@ class ChatViewModel : ViewModel() {
                         else -> "Usuario"
                     }
 
-                    // Elimina cualquier palabra duplicada consecutiva
                     val nombreFinal = nombreBase.split("\\s+".toRegex())
                         .distinct()
                         .joinToString(" ")
@@ -438,18 +441,44 @@ class ChatViewModel : ViewModel() {
         batch.commit()
     }
 
-    fun completarServicio(onSuccess: () -> Unit = {}, onError: (String) -> Unit = {}) {
+    /**
+     * Completa el servicio y registra la calificación y opinión del prestador en Firebase.
+     */
+    fun completarServicioYCalificar(
+        calificacion: Int,
+        comentario: String,
+        onSuccess: () -> Unit = {},
+        onError: (String) -> Unit = {}
+    ) {
         if (chatIdActual.isBlank() || esChatDirecto) return
 
-        db.collection("solicitudes").document(chatIdActual)
-            .update("estado", "COMPLETADO")
-            .addOnSuccessListener {
-                enviarMensaje("🎉 El cliente ha marcado el servicio como COMPLETADO.")
-                onSuccess()
-            }
-            .addOnFailureListener { error ->
-                onError(error.message ?: "Error al completar el servicio")
-            }
+        val prestadorId = _uiState.value.idContraparte
+        if (prestadorId.isBlank() || currentUserIdActual.isBlank()) {
+            onError("No se pudo obtener la información de las partes")
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true)
+            val result = solicitudRepository.completarServicioYCalificar(
+                solicitudId = chatIdActual,
+                clienteId = currentUserIdActual,
+                prestadorId = prestadorId,
+                calificacion = calificacion,
+                comentario = comentario
+            )
+            _uiState.value = _uiState.value.copy(isLoading = false)
+
+            result.fold(
+                onSuccess = {
+                    enviarMensaje("🎉 El cliente ha completado el servicio y ha dejado una evaluación de $calificacion ★.")
+                    onSuccess()
+                },
+                onFailure = { error ->
+                    onError(error.message ?: "Error al completar y calificar el servicio")
+                }
+            )
+        }
     }
 
     private fun detenerListeners() {

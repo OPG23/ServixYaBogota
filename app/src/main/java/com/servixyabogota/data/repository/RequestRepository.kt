@@ -3,6 +3,7 @@ package com.servixyabogota.data.repository
 import android.content.Context
 import android.net.Uri
 import android.webkit.MimeTypeMap
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 import com.servixyabogota.data.model.Propuesta
@@ -98,6 +99,65 @@ class SolicitudRepository {
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    /**
+     * Marca el servicio como COMPLETADO, registra la reseña/calificación y recalcula
+     * el promedio de estrellas del prestador en la base de datos.
+     */
+    suspend fun completarServicioYCalificar(
+        solicitudId: String,
+        clienteId: String,
+        prestadorId: String,
+        calificacion: Int,
+        comentario: String
+    ): Result<Unit> = try {
+        val batch = db.batch()
+
+        // 1. Cambiar estado de la solicitud
+        val solicitudRef = db.collection("solicitudes").document(solicitudId)
+        batch.update(solicitudRef, mapOf(
+            "estado" to "COMPLETADA",
+            "fechaCompletada" to Timestamp.now()
+        ))
+
+        // 2. Crear documento de reseña
+        val resenaRef = db.collection("resenas").document()
+        val nuevaResena = hashMapOf(
+            "solicitudId" to solicitudId,
+            "clienteId" to clienteId,
+            "prestadorId" to prestadorId,
+            "calificacion" to calificacion,
+            "comentario" to comentario,
+            "fecha" to Timestamp.now()
+        )
+        batch.set(resenaRef, nuevaResena)
+
+        // Ejecutar los cambios en lote
+        batch.commit().await()
+
+        // 3. Recalcular el promedio de estrellas del prestador
+        val resenasQuery = db.collection("resenas")
+            .whereEqualTo("prestadorId", prestadorId)
+            .get()
+            .await()
+
+        val docs = resenasQuery.documents
+        val totalResenas = docs.size
+        val suma = docs.sumOf { it.getLong("calificacion") ?: 5L }
+        val nuevoPromedio = if (totalResenas > 0) suma.toDouble() / totalResenas else 5.0
+
+        db.collection("usuarios").document(prestadorId)
+            .update(
+                mapOf(
+                    "calificacion" to nuevoPromedio,
+                    "totalResenas" to totalResenas
+                )
+            ).await()
+
+        Result.success(Unit)
+    } catch (e: Exception) {
+        Result.failure(e)
     }
 
     // ==========================================
