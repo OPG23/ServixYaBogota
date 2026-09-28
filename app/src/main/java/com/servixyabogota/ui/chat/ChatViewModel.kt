@@ -443,9 +443,7 @@ class ChatViewModel : ViewModel() {
 
     /**
      * Completa el servicio y registra la calificación y opinión del prestador en Firebase.
-     */
-    /**
-     * Completa el servicio y registra la calificación y opinión del prestador en Firebase.
+     * Funciona tanto para solicitudes como para chats directos.
      */
     fun completarServicioYCalificar(
         calificacion: Int,
@@ -453,7 +451,8 @@ class ChatViewModel : ViewModel() {
         onSuccess: () -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
-        if (chatIdActual.isBlank() || esChatDirecto) return
+        // Se elimina el bloqueo por 'esChatDirecto'
+        if (chatIdActual.isBlank()) return
 
         val prestadorId = _uiState.value.idContraparte
         if (prestadorId.isBlank() || currentUserIdActual.isBlank()) {
@@ -463,7 +462,7 @@ class ChatViewModel : ViewModel() {
 
         _uiState.value = _uiState.value.copy(isLoading = true)
 
-        // Consultar primero el nombre del cliente para guardarlo en la reseña
+        // Consultar el nombre del cliente antes de enviar la reseña
         db.collection("usuarios").document(currentUserIdActual).get()
             .addOnSuccessListener { docCliente ->
                 val nombreCliente = docCliente.getString("nombreCompleto")
@@ -477,7 +476,8 @@ class ChatViewModel : ViewModel() {
                         prestadorId = prestadorId,
                         calificacion = calificacion,
                         comentario = comentario,
-                        clienteNombre = nombreCliente
+                        clienteNombre = nombreCliente,
+                        esChatDirecto = esChatDirecto
                     )
                     _uiState.value = _uiState.value.copy(isLoading = false)
 

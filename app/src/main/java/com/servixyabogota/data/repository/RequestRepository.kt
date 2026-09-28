@@ -104,27 +104,44 @@ class SolicitudRepository {
      * Marca el servicio como COMPLETADO, registra la reseña/calificación con el nombre del cliente
      * y recalcula el promedio de estrellas del prestador en Firestore.
      */
+    /**
+     * Marca el servicio como COMPLETADO (ya sea en solicitudes o chats directos),
+     * registra la reseña en 'resenas' y recalcula el promedio de estrellas del prestador.
+     */
     suspend fun completarServicioYCalificar(
         solicitudId: String,
         clienteId: String,
         prestadorId: String,
         calificacion: Int,
         comentario: String,
-        clienteNombre: String = ""
+        clienteNombre: String = "",
+        esChatDirecto: Boolean = false
     ): Result<Unit> = try {
         val batch = db.batch()
 
-        // 1. Cambiar estado de la solicitud
-        val solicitudRef = db.collection("solicitudes").document(solicitudId)
-        batch.update(solicitudRef, mapOf(
-            "estado" to "COMPLETADA",
-            "fechaCompletada" to Timestamp.now()
-        ))
+        val esDirecto = esChatDirecto || solicitudId.startsWith("chat_") || solicitudId.startsWith("direct_")
 
-        // 2. Crear documento de reseña
+        if (esDirecto) {
+            // 1a. Actualizar estado en la colección 'chats'
+            val chatRef = db.collection("chats").document(solicitudId)
+            batch.set(chatRef, mapOf(
+                "estado" to "COMPLETADA",
+                "fechaCompletada" to Timestamp.now()
+            ), com.google.firebase.firestore.SetOptions.merge())
+        } else {
+            // 1b. Actualizar estado en la colección 'solicitudes'
+            val solicitudRef = db.collection("solicitudes").document(solicitudId)
+            batch.update(solicitudRef, mapOf(
+                "estado" to "COMPLETADA",
+                "fechaCompletada" to Timestamp.now()
+            ))
+        }
+
+        // 2. Crear documento de reseña independiente (sirve tanto para chats como solicitudes)
         val resenaRef = db.collection("resenas").document()
         val nuevaResena = hashMapOf(
             "solicitudId" to solicitudId,
+            "chatId" to solicitudId,
             "clienteId" to clienteId,
             "clienteNombre" to clienteNombre,
             "prestadorId" to prestadorId,
@@ -134,10 +151,10 @@ class SolicitudRepository {
         )
         batch.set(resenaRef, nuevaResena)
 
-        // Ejecutar los cambios en lote
+        // Guardar cambios en lote
         batch.commit().await()
 
-        // 3. Recalcular el promedio de estrellas del prestador
+        // 3. Recalcular el promedio total de estrellas del prestador
         val resenasQuery = db.collection("resenas")
             .whereEqualTo("prestadorId", prestadorId)
             .get()
@@ -146,13 +163,12 @@ class SolicitudRepository {
         val docs = resenasQuery.documents
         val totalResenas = docs.size
 
-        // Obtención segura de números (soporta Int, Long y Double)
         val suma = docs.sumOf { doc ->
             (doc.get("calificacion") as? Number)?.toDouble() ?: calificacion.toDouble()
         }
         val nuevoPromedio = if (totalResenas > 0) suma / totalResenas else 5.0
 
-        // Se actualizan todos los alias del campo para garantizar compatibilidad total
+        // Actualizar perfil del prestador con los alias de calificaciones
         db.collection("usuarios").document(prestadorId)
             .update(
                 mapOf(
