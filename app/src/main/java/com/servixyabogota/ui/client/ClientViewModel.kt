@@ -12,6 +12,7 @@ import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.storage.FirebaseStorage
 import com.servixyabogota.data.model.Solicitud
 import com.servixyabogota.data.repository.SolicitudRepository
 import kotlinx.coroutines.flow.SharingStarted
@@ -23,6 +24,7 @@ class ClientViewModel : ViewModel() {
 
     private val auth = FirebaseAuth.getInstance()
     private val db = FirebaseFirestore.getInstance()
+    private val storage = FirebaseStorage.getInstance()
     private val repository: SolicitudRepository = SolicitudRepository()
 
     // Estados del perfil
@@ -232,9 +234,13 @@ class ClientViewModel : ViewModel() {
             }
     }
 
+    /**
+     * Actualiza el nombre, teléfono y/o la foto de perfil en Firebase Storage y Firestore
+     */
     fun guardarCambiosPerfil(
         nuevoNombre: String,
         nuevoTelefono: String,
+        nuevaFotoUri: Uri? = null,
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
@@ -249,7 +255,7 @@ class ClientViewModel : ViewModel() {
         val nombrePropio = partesNombre.firstOrNull() ?: ""
         val apellidoPropio = if (partesNombre.size > 1) partesNombre.drop(1).joinToString(" ") else ""
 
-        val updates = mapOf(
+        val updates = mutableMapOf<String, Any>(
             "nombre" to nuevoNombre,
             "nombreCompleto" to nuevoNombre,
             "primerNombre" to nombrePropio,
@@ -258,18 +264,51 @@ class ClientViewModel : ViewModel() {
             "ultimaActualizacion" to Timestamp.now()
         )
 
-        db.collection("usuarios").document(user.uid)
-            .set(updates, SetOptions.merge())
-            .addOnSuccessListener {
-                nombre = nuevoNombre
-                telefono = nuevoTelefono
-                estaGuardando = false
-                onSuccess()
+        fun guardarEnFirestore(urlFotoDescargada: String? = null) {
+            if (urlFotoDescargada != null) {
+                updates["fotoUrl"] = urlFotoDescargada
+                updates["photoUrl"] = urlFotoDescargada
             }
-            .addOnFailureListener { e ->
-                estaGuardando = false
-                onError(e.localizedMessage ?: "Error al actualizar la información.")
-            }
+
+            db.collection("usuarios").document(user.uid)
+                .set(updates, SetOptions.merge())
+                .addOnSuccessListener {
+                    nombre = nuevoNombre
+                    telefono = nuevoTelefono
+                    if (urlFotoDescargada != null) {
+                        fotoUrl = urlFotoDescargada
+                    }
+                    estaGuardando = false
+                    onSuccess()
+                }
+                .addOnFailureListener { e ->
+                    estaGuardando = false
+                    onError(e.localizedMessage ?: "Error al actualizar la información en Firestore.")
+                }
+        }
+
+        // Si el usuario seleccionó una imagen local nueva
+        if (nuevaFotoUri != null) {
+            val storageRef = storage.reference.child("profile_images/${user.uid}.jpg")
+
+            storageRef.putFile(nuevaFotoUri)
+                .addOnSuccessListener {
+                    storageRef.downloadUrl
+                        .addOnSuccessListener { downloadUri ->
+                            guardarEnFirestore(downloadUri.toString())
+                        }
+                        .addOnFailureListener { e ->
+                            estaGuardando = false
+                            onError(e.localizedMessage ?: "Error al obtener la URL de la imagen.")
+                        }
+                }
+                .addOnFailureListener { e ->
+                    estaGuardando = false
+                    onError(e.localizedMessage ?: "Error al subir la imagen de perfil.")
+                }
+        } else {
+            guardarEnFirestore()
+        }
     }
 
     fun publicarSolicitud(
