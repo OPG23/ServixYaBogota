@@ -48,7 +48,8 @@ data class ChatUiState(
     val rolContraparte: String = "",
     val esCliente: Boolean = true,
     val isLoading: Boolean = true,
-    val error: String? = null
+    val error: String? = null,
+    val esChatDirecto: Boolean = false
 )
 
 class ChatViewModel : ViewModel() {
@@ -79,7 +80,8 @@ class ChatViewModel : ViewModel() {
 
         _uiState.value = ChatUiState(
             esCliente = esCliente,
-            isLoading = true
+            isLoading = true,
+            esChatDirecto = esChatDirecto
         )
 
         if (esChatDirecto) {
@@ -122,7 +124,8 @@ class ChatViewModel : ViewModel() {
                         clienteCalifico = clienteCalifico,
                         prestadorCalifico = prestadorCalifico,
                         idContraparte = idContraparte,
-                        rolContraparte = rolContraparte
+                        rolContraparte = rolContraparte,
+                        esChatDirecto = false
                     )
 
                     if (idContraparte.isNotBlank()) {
@@ -162,7 +165,8 @@ class ChatViewModel : ViewModel() {
                         clienteCalifico = clienteCalifico,
                         prestadorCalifico = prestadorCalifico,
                         idContraparte = idContraparte,
-                        rolContraparte = rolContraparte
+                        rolContraparte = rolContraparte,
+                        esChatDirecto = true
                     )
 
                     if (idContraparte.isNotBlank()) {
@@ -384,7 +388,14 @@ class ChatViewModel : ViewModel() {
     fun enviarOferta(monto: Double, descripcion: String) {
         if (chatIdActual.isBlank() || currentUserIdActual.isBlank() || monto <= 0) return
 
-        if (_uiState.value.estadoPropuesta == "ACEPTADA" || _uiState.value.estadoPropuesta == "PENDIENTE") return
+        val yaCalificadoOCompletado = _uiState.value.clienteCalifico ||
+                _uiState.value.estadoSolicitud in listOf("COMPLETADO", "COMPLETADA", "FINALIZADO")
+
+        // No enviar si hay una oferta actualmente pendiente
+        if (_uiState.value.estadoPropuesta == "PENDIENTE") return
+
+        // Si la oferta fue ACEPTADA, solo permitimos una nueva si es chat directo y el servicio ya terminó/calificó
+        if (_uiState.value.estadoPropuesta == "ACEPTADA" && !(esChatDirecto && yaCalificadoOCompletado)) return
 
         val coleccionPadre = if (esChatDirecto) "chats" else "solicitudes"
         val refPadre = db.collection(coleccionPadre).document(chatIdActual)
@@ -419,6 +430,13 @@ class ChatViewModel : ViewModel() {
             "estadoPropuesta" to "PENDIENTE",
             campoNoLeidosDestinatario to FieldValue.increment(1)
         )
+
+        // Al iniciar un nuevo ciclo de cotización en chat directo, reiniciamos el estado de calificación
+        if (esChatDirecto && yaCalificadoOCompletado) {
+            datosUltimoMensaje["clienteCalifico"] = false
+            datosUltimoMensaje["prestadorCalifico"] = false
+            datosUltimoMensaje["estado"] = "PENDIENTE"
+        }
 
         batch.set(refPadre, datosUltimoMensaje, SetOptions.merge())
         batch.commit()

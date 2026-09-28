@@ -115,6 +115,10 @@ fun ChatDetailScreen(
 
     val uiState by viewModel.uiState.collectAsState()
 
+    val esChatDirecto = remember(chatId, uiState.esChatDirecto) {
+        uiState.esChatDirecto || chatId.startsWith("chat_") || chatId.startsWith("direct_")
+    }
+
     val nombreApellidoParametro = remember(interlocutorNombre, interlocutorApellido) {
         "$interlocutorNombre $interlocutorApellido".trim()
     }
@@ -146,6 +150,18 @@ fun ChatDetailScreen(
 
     val cotizacionAceptada = !servicioCompletado && (uiState.estadoPropuesta == "ACEPTADA" || ultimaOferta?.estadoOferta == "ACEPTADA")
     val hayOfertaPendiente = uiState.estadoPropuesta == "PENDIENTE" || ultimaOferta?.estadoOferta == "PENDIENTE"
+    val yaCalificadoOCompletado = uiState.clienteCalifico || servicioCompletado
+
+    // Regla para mostrar botón de nueva oferta al prestador
+    val mostrarBotonOferta = if (!esCliente) {
+        if (esChatDirecto && yaCalificadoOCompletado) {
+            !hayOfertaPendiente
+        } else {
+            !cotizacionAceptada && !hayOfertaPendiente && !servicioCompletado
+        }
+    } else {
+        false
+    }
 
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
@@ -562,7 +578,7 @@ fun ChatDetailScreen(
                             )
                         }
 
-                        if (!esCliente && !cotizacionAceptada && !hayOfertaPendiente && !servicioCompletado) {
+                        if (mostrarBotonOferta) {
                             IconButton(onClick = { showOfertaDialog = true }) {
                                 Icon(
                                     imageVector = Icons.Default.AttachMoney,
