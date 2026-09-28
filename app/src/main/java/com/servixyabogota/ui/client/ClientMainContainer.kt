@@ -9,10 +9,11 @@ import com.google.firebase.auth.FirebaseAuth
 import com.servixyabogota.ui.chat.ChatDetailScreen
 import com.servixyabogota.ui.chat.ChatViewModel
 
-// Modelo simple para manejar el estado del chat en el Cliente
 data class ChatClienteUi(
     val id: String,
     val nombrePrestador: String,
+    val fotoPrestadorUrl: String? = null,
+    val prestadorId: String? = null,
     val tituloSolicitud: String? = null
 )
 
@@ -40,20 +41,51 @@ fun ClientMainContainer(
     var currentSettingsSubScreen by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedProposalRequestId by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // 1. PANTALLA DE CHAT ACTIVO
+    // 1. PANTALLA DE CHAT ACTIVO (Navegación al detalle del chat)
     if (chatClienteActivo != null) {
+        val activeChat = chatClienteActivo!!
+
         ChatDetailScreen(
-            chatId = chatClienteActivo!!.id,
+            chatId = activeChat.id,
             currentUserId = currentUserId,
             esCliente = true,
-            interlocutorNombre = chatClienteActivo!!.nombrePrestador,
-            solicitudInfo = chatClienteActivo!!.tituloSolicitud,
-            actionButtonText = if (chatClienteActivo!!.tituloSolicitud != null) "Confirmar Servicio" else null,
-            onActionButtonClick = {
-                Toast.makeText(context, "Procesando contratación del servicio...", Toast.LENGTH_SHORT).show()
-            },
+            interlocutorNombre = activeChat.nombrePrestador,
+            interlocutorFotoUrl = activeChat.fotoPrestadorUrl,
+            solicitudInfo = activeChat.tituloSolicitud,
+            onVerSolicitudClick = if (activeChat.tituloSolicitud != null) {
+                {
+                    Toast.makeText(context, "Mostrando detalle de: ${activeChat.tituloSolicitud}", Toast.LENGTH_SHORT).show()
+                }
+            } else null,
             viewModel = chatViewModel,
-            onBack = { chatClienteActivo = null }
+            onBack = { chatClienteActivo = null },
+            onVerPerfilPrestador = { idPrestadorEmitido ->
+                // idPrestadorEmitido es el ID real recuperado por ChatViewModel desde Firestore
+                val idTarget = idPrestadorEmitido.ifBlank { activeChat.prestadorId ?: "" }
+
+                val prestadorEncontrado = viewModel.listaPrestadores.find { prestador ->
+                    prestador.id == idTarget ||
+                            (activeChat.prestadorId != null && prestador.id == activeChat.prestadorId) ||
+                            prestador.nombre.equals(activeChat.nombrePrestador.trim(), ignoreCase = true)
+                }
+
+                if (prestadorEncontrado != null) {
+                    selectedProviderId = prestadorEncontrado.id
+                    showDirectChats = false
+                    chatClienteActivo = null
+                } else if (idTarget.isNotBlank()) {
+                    // Si el ID existe pero no está en la lista reducida, intentamos asignarlo
+                    selectedProviderId = idTarget
+                    showDirectChats = false
+                    chatClienteActivo = null
+                } else {
+                    Toast.makeText(
+                        context,
+                        "No se encontró la información del prestador",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
         )
     }
     // 2. VISTA DE CREAR SOLICITUD
@@ -80,28 +112,46 @@ fun ClientMainContainer(
             }
         )
     }
-    // 3. VISTA DE CHATS DIRECTOS
-    else if (showDirectChats) {
-        ClientDirectChatsScreen(
-            onBack = { showDirectChats = false },
-            onOpenChat = { chatId, providerName ->
-                chatClienteActivo = ChatClienteUi(
-                    id = chatId,
-                    nombrePrestador = providerName,
-                    tituloSolicitud = null
+    // 3. VISTA DE DETALLE DEL PERFIL DEL PRESTADOR
+    else if (selectedProvider != null) {
+        val provider = selectedProvider
+
+        ProviderDetailProfileScreen(
+            prestador = provider,
+            onBack = { selectedProviderId = null },
+            onIniciarChat = {
+                viewModel.obtenerOCrearChatDirecto(
+                    prestadorId = provider.id,
+                    onSuccess = { chatIdReal ->
+                        selectedProviderId = null
+                        chatClienteActivo = ChatClienteUi(
+                            id = chatIdReal,
+                            nombrePrestador = provider.nombre,
+                            fotoPrestadorUrl = provider.fotoUrl,
+                            prestadorId = provider.id,
+                            tituloSolicitud = null
+                        )
+                    },
+                    onError = { error ->
+                        Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+                    }
                 )
             }
         )
     }
-    // 4. VISTA DE DETALLE DEL PERFIL DEL PRESTADOR
-    else if (selectedProviderId != null && selectedProvider != null) {
-        ProviderDetailProfileScreen(
-            prestador = selectedProvider,
-            onBack = { selectedProviderId = null },
-            onIniciarChat = {
+    // 4. VISTA DE CHATS DIRECTOS
+    else if (showDirectChats) {
+        ClientDirectChatsScreen(
+            onBack = { showDirectChats = false },
+            onOpenChat = { chatId, providerName, providerId ->
+                val prestadorMatch = viewModel.listaPrestadores.find {
+                    it.id == providerId || it.nombre.equals(providerName.trim(), ignoreCase = true)
+                }
                 chatClienteActivo = ChatClienteUi(
-                    id = "chat_${selectedProvider.id}",
-                    nombrePrestador = selectedProvider.nombre,
+                    id = chatId,
+                    nombrePrestador = providerName,
+                    fotoPrestadorUrl = prestadorMatch?.fotoUrl,
+                    prestadorId = providerId.ifBlank { prestadorMatch?.id },
                     tituloSolicitud = null
                 )
             }
@@ -120,10 +170,20 @@ fun ClientMainContainer(
                         currentTab = selectedTab
                     },
                     onIniciarChat = { prestador ->
-                        chatClienteActivo = ChatClienteUi(
-                            id = "chat_${prestador.id}",
-                            nombrePrestador = prestador.nombre,
-                            tituloSolicitud = null
+                        viewModel.obtenerOCrearChatDirecto(
+                            prestadorId = prestador.id,
+                            onSuccess = { chatIdReal ->
+                                chatClienteActivo = ChatClienteUi(
+                                    id = chatIdReal,
+                                    nombrePrestador = prestador.nombre,
+                                    fotoPrestadorUrl = prestador.fotoUrl,
+                                    prestadorId = prestador.id,
+                                    tituloSolicitud = null
+                                )
+                            },
+                            onError = { error ->
+                                Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+                            }
                         )
                     },
                     onVerPerfilPrestador = { prestador ->
@@ -157,16 +217,20 @@ fun ClientMainContainer(
                     ClientReceivedProposalsScreen(
                         solicitudId = selectedProposalRequestId!!,
                         onBack = { selectedProposalRequestId = null },
-                        onOpenChat = { _ ->
+                        onOpenChat = { solicitudId, prestadorId, nombrePrestador ->
+                            val prestadorMatch = viewModel.listaPrestadores.find { it.id == prestadorId }
                             chatClienteActivo = ChatClienteUi(
-                                id = selectedProposalRequestId!!,
-                                nombrePrestador = "Prestador",
+                                id = solicitudId,
+                                nombrePrestador = nombrePrestador,
+                                fotoPrestadorUrl = prestadorMatch?.fotoUrl,
+                                prestadorId = prestadorId,
                                 tituloSolicitud = "Propuesta de Servicio"
                             )
                         }
                     )
                 } else {
                     ClientProposalsScreen(
+                        clientViewModel = viewModel,
                         onNavigateTab = { selectedTab ->
                             currentSettingsSubScreen = null
                             selectedProposalRequestId = null

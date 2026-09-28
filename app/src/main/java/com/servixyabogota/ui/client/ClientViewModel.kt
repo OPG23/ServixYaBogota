@@ -12,17 +12,32 @@ import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
+import com.google.firebase.storage.FirebaseStorage
 import com.servixyabogota.data.model.Solicitud
 import com.servixyabogota.data.repository.SolicitudRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+// Modelo UI para las reseñas del cliente
+data class ReviewItem(
+    val id: String = "",
+    val nombre: String = "Prestador",
+    val fecha: String = "",
+    val calificacion: Int = 5,
+    val comentario: String = "",
+    val fechaObj: Date? = null
+)
 
 class ClientViewModel : ViewModel() {
 
     private val auth = FirebaseAuth.getInstance()
     private val db = FirebaseFirestore.getInstance()
+    private val storage = FirebaseStorage.getInstance()
     private val repository: SolicitudRepository = SolicitudRepository()
 
     // Estados del perfil
@@ -41,9 +56,267 @@ class ClientViewModel : ViewModel() {
     var listaPrestadores by mutableStateOf<List<ClientProviderModel>>(emptyList())
     var estaCargandoPrestadores by mutableStateOf(false)
 
+    // ESTADOS PARA RESEÑAS REALES DE FIRESTORE
+    var listaResenasOtorgadas by mutableStateOf<List<ReviewItem>>(emptyList())
+        private set
+    var listaResenasRecibidas by mutableStateOf<List<ReviewItem>>(emptyList())
+        private set
+    var promedioCalificacion by mutableStateOf(5.0)
+        private set
+    var totalResenasCount by mutableStateOf(0)
+        private set
+    var estaCargandoResenas by mutableStateOf(false)
+        private set
+
     init {
         cargarPerfilCliente()
         cargarPrestadores()
+        escucharResenas()
+    }
+
+    /**
+     * Escucha en tiempo real la reputación y las reseñas otorgadas/recibidas por el cliente
+     */
+    fun escucharResenas() {
+        val uid = auth.currentUser?.uid ?: return
+        estaCargandoResenas = true
+
+        // 1. Escuchar promedio de estrellas y total de reseñas desde el perfil del usuario
+        db.collection("usuarios").document(uid)
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null && snapshot.exists()) {
+                    promedioCalificacion = snapshot.getDouble("calificacion")
+                        ?: snapshot.getDouble("promedioCalificacion")
+                                ?: 5.0
+                    totalResenasCount = snapshot.getLong("totalResenas")?.toInt() ?: 0
+                }
+            }
+
+        // 2. Escuchar reseñas OTORGADAS por el cliente a prestadores (Cliente -> Prestador)
+        db.collection("resenas")
+            .whereEqualTo("autorId", uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    estaCargandoResenas = false
+                    return@addSnapshotListener
+                }
+
+                if (snapshot == null || snapshot.documents.isEmpty()) {
+                    listaResenasOtorgadas = emptyList()
+                    estaCargandoResenas = false
+                    return@addSnapshotListener
+                }
+
+                val docsFiltered = snapshot.documents.filter { doc ->
+                    doc.getString("tipo") != "PRESTADOR_A_CLIENTE"
+                }
+
+                if (docsFiltered.isEmpty()) {
+                    listaResenasOtorgadas = emptyList()
+                    estaCargandoResenas = false
+                    return@addSnapshotListener
+                }
+
+                val otorgadasTemp = mutableListOf<ReviewItem>()
+                var procesados = 0
+
+                for (doc in docsFiltered) {
+                    val reviewId = doc.id
+                    val prestadorId = doc.getString("prestadorId") ?: doc.getString("destinatarioId") ?: ""
+                    val calificacion = doc.getLong("calificacion")?.toInt() ?: 5
+                    val comentario = doc.getString("comentario") ?: ""
+                    val timestamp = doc.getTimestamp("fecha")
+                    val fechaObj = timestamp?.toDate()
+
+                    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                    val fechaFormateada = if (fechaObj != null) sdf.format(fechaObj) else "Reciente"
+                    val prestadorNombreDirecto = doc.getString("prestadorNombre") ?: doc.getString("destinatarioNombre")
+
+                    if (!prestadorNombreDirecto.isNullOrBlank()) {
+                        otorgadasTemp.add(
+                            ReviewItem(
+                                id = reviewId,
+                                nombre = prestadorNombreDirecto,
+                                fecha = fechaFormateada,
+                                calificacion = calificacion,
+                                comentario = comentario,
+                                fechaObj = fechaObj
+                            )
+                        )
+                        procesados++
+                        if (procesados == docsFiltered.size) {
+                            listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
+                            estaCargandoResenas = false
+                        }
+                    } else if (prestadorId.isNotBlank()) {
+                        db.collection("usuarios").document(prestadorId).get()
+                            .addOnSuccessListener { providerDoc ->
+                                val nombreDoc = providerDoc.getString("nombreCompleto")
+                                val primerNombre = providerDoc.getString("nombre") ?: ""
+                                val apellido = providerDoc.getString("apellido") ?: ""
+
+                                val nombreFinal = when {
+                                    !nombreDoc.isNullOrBlank() -> nombreDoc
+                                    primerNombre.isNotBlank() -> "$primerNombre $apellido".trim()
+                                    else -> "Prestador ServixYa"
+                                }
+
+                                otorgadasTemp.add(
+                                    ReviewItem(
+                                        id = reviewId,
+                                        nombre = nombreFinal,
+                                        fecha = fechaFormateada,
+                                        calificacion = calificacion,
+                                        comentario = comentario,
+                                        fechaObj = fechaObj
+                                    )
+                                )
+                                procesados++
+                                if (procesados == docsFiltered.size) {
+                                    listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
+                                    estaCargandoResenas = false
+                                }
+                            }
+                            .addOnFailureListener {
+                                otorgadasTemp.add(
+                                    ReviewItem(
+                                        id = reviewId,
+                                        nombre = "Prestador ServixYa",
+                                        fecha = fechaFormateada,
+                                        calificacion = calificacion,
+                                        comentario = comentario,
+                                        fechaObj = fechaObj
+                                    )
+                                )
+                                procesados++
+                                if (procesados == docsFiltered.size) {
+                                    listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
+                                    estaCargandoResenas = false
+                                }
+                            }
+                    } else {
+                        otorgadasTemp.add(
+                            ReviewItem(
+                                id = reviewId,
+                                nombre = "Prestador ServixYa",
+                                fecha = fechaFormateada,
+                                calificacion = calificacion,
+                                comentario = comentario,
+                                fechaObj = fechaObj
+                            )
+                        )
+                        procesados++
+                        if (procesados == docsFiltered.size) {
+                            listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
+                            estaCargandoResenas = false
+                        }
+                    }
+                }
+            }
+
+        // 3. Escuchar reseñas RECIBIDAS por el cliente (Prestador -> Cliente)
+        db.collection("resenas")
+            .whereEqualTo("destinatarioId", uid)
+            .whereEqualTo("tipo", "PRESTADOR_A_CLIENTE")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null || snapshot.documents.isEmpty()) {
+                    listaResenasRecibidas = emptyList()
+                    return@addSnapshotListener
+                }
+
+                val docs = snapshot.documents
+                val recibidasTemp = mutableListOf<ReviewItem>()
+                var procesados = 0
+
+                for (doc in docs) {
+                    val reviewId = doc.id
+                    val prestadorId = doc.getString("autorId") ?: doc.getString("prestadorId") ?: ""
+                    val calificacion = doc.getLong("calificacion")?.toInt() ?: 5
+                    val comentario = doc.getString("comentario") ?: ""
+                    val timestamp = doc.getTimestamp("fecha")
+                    val fechaObj = timestamp?.toDate()
+
+                    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                    val fechaFormateada = if (fechaObj != null) sdf.format(fechaObj) else "Reciente"
+                    val prestadorNombreDirecto = doc.getString("autorNombre") ?: doc.getString("prestadorNombre")
+
+                    if (!prestadorNombreDirecto.isNullOrBlank()) {
+                        recibidasTemp.add(
+                            ReviewItem(
+                                id = reviewId,
+                                nombre = prestadorNombreDirecto,
+                                fecha = fechaFormateada,
+                                calificacion = calificacion,
+                                comentario = comentario,
+                                fechaObj = fechaObj
+                            )
+                        )
+                        procesados++
+                        if (procesados == docs.size) {
+                            listaResenasRecibidas = recibidasTemp.sortedByDescending { it.fechaObj }
+                        }
+                    } else if (prestadorId.isNotBlank()) {
+                        db.collection("usuarios").document(prestadorId).get()
+                            .addOnSuccessListener { providerDoc ->
+                                val nombreDoc = providerDoc.getString("nombreCompleto")
+                                val primerNombre = providerDoc.getString("nombre") ?: ""
+                                val apellido = providerDoc.getString("apellido") ?: ""
+
+                                val nombreFinal = when {
+                                    !nombreDoc.isNullOrBlank() -> nombreDoc
+                                    primerNombre.isNotBlank() -> "$primerNombre $apellido".trim()
+                                    else -> "Prestador ServixYa"
+                                }
+
+                                recibidasTemp.add(
+                                    ReviewItem(
+                                        id = reviewId,
+                                        nombre = nombreFinal,
+                                        fecha = fechaFormateada,
+                                        calificacion = calificacion,
+                                        comentario = comentario,
+                                        fechaObj = fechaObj
+                                    )
+                                )
+                                procesados++
+                                if (procesados == docs.size) {
+                                    listaResenasRecibidas = recibidasTemp.sortedByDescending { it.fechaObj }
+                                }
+                            }
+                            .addOnFailureListener {
+                                recibidasTemp.add(
+                                    ReviewItem(
+                                        id = reviewId,
+                                        nombre = "Prestador ServixYa",
+                                        fecha = fechaFormateada,
+                                        calificacion = calificacion,
+                                        comentario = comentario,
+                                        fechaObj = fechaObj
+                                    )
+                                )
+                                procesados++
+                                if (procesados == docs.size) {
+                                    listaResenasRecibidas = recibidasTemp.sortedByDescending { it.fechaObj }
+                                }
+                            }
+                    } else {
+                        recibidasTemp.add(
+                            ReviewItem(
+                                id = reviewId,
+                                nombre = "Prestador ServixYa",
+                                fecha = fechaFormateada,
+                                calificacion = calificacion,
+                                comentario = comentario,
+                                fechaObj = fechaObj
+                            )
+                        )
+                        procesados++
+                        if (procesados == docs.size) {
+                            listaResenasRecibidas = recibidasTemp.sortedByDescending { it.fechaObj }
+                        }
+                    }
+                }
+            }
     }
 
     /**
@@ -143,6 +416,55 @@ class ClientViewModel : ViewModel() {
     }
 
     /**
+     * Crea un canal de chat directo en Firestore entre el cliente autenticado y el prestador
+     */
+    fun obtenerOCrearChatDirecto(
+        prestadorId: String,
+        onSuccess: (chatId: String) -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val clienteId = auth.currentUser?.uid
+        if (clienteId.isNullOrEmpty()) {
+            onError("Debes iniciar sesión para escribir a un prestador")
+            return
+        }
+
+        // Crea un ID determinista para evitar duplicar salas entre los dos mismos usuarios
+        val chatIdConstruido = if (clienteId < prestadorId) {
+            "chat_${clienteId}_$prestadorId"
+        } else {
+            "chat_${prestadorId}_$clienteId"
+        }
+
+        val chatRef = db.collection("chats").document(chatIdConstruido)
+
+        chatRef.get().addOnSuccessListener { doc ->
+            if (doc.exists()) {
+                onSuccess(chatIdConstruido)
+            } else {
+                val nuevoChat = hashMapOf(
+                    "clienteId" to clienteId,
+                    "prestadorId" to prestadorId,
+                    "usuarios" to listOf(clienteId, prestadorId),
+                    "fechaCreacion" to Timestamp.now(),
+                    "ultimoMensaje" to "Conversación iniciada",
+                    "fechaUltimoMensaje" to Timestamp.now()
+                )
+
+                chatRef.set(nuevoChat, SetOptions.merge())
+                    .addOnSuccessListener {
+                        onSuccess(chatIdConstruido)
+                    }
+                    .addOnFailureListener { e ->
+                        onError(e.localizedMessage ?: "Error al iniciar el chat")
+                    }
+            }
+        }.addOnFailureListener { e ->
+            onError(e.localizedMessage ?: "Error al verificar la conversación")
+        }
+    }
+
+    /**
      * Carga la información del usuario cliente
      */
     fun cargarPerfilCliente() {
@@ -183,9 +505,13 @@ class ClientViewModel : ViewModel() {
             }
     }
 
+    /**
+     * Actualiza el nombre, teléfono y/o la foto de perfil en Firebase Storage y Firestore
+     */
     fun guardarCambiosPerfil(
         nuevoNombre: String,
         nuevoTelefono: String,
+        nuevaFotoUri: Uri? = null,
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
@@ -200,7 +526,7 @@ class ClientViewModel : ViewModel() {
         val nombrePropio = partesNombre.firstOrNull() ?: ""
         val apellidoPropio = if (partesNombre.size > 1) partesNombre.drop(1).joinToString(" ") else ""
 
-        val updates = mapOf(
+        val updates = mutableMapOf<String, Any>(
             "nombre" to nuevoNombre,
             "nombreCompleto" to nuevoNombre,
             "primerNombre" to nombrePropio,
@@ -209,18 +535,50 @@ class ClientViewModel : ViewModel() {
             "ultimaActualizacion" to Timestamp.now()
         )
 
-        db.collection("usuarios").document(user.uid)
-            .set(updates, SetOptions.merge())
-            .addOnSuccessListener {
-                nombre = nuevoNombre
-                telefono = nuevoTelefono
-                estaGuardando = false
-                onSuccess()
+        fun guardarEnFirestore(urlFotoDescargada: String? = null) {
+            if (urlFotoDescargada != null) {
+                updates["fotoUrl"] = urlFotoDescargada
+                updates["photoUrl"] = urlFotoDescargada
             }
-            .addOnFailureListener { e ->
-                estaGuardando = false
-                onError(e.localizedMessage ?: "Error al actualizar la información.")
-            }
+
+            db.collection("usuarios").document(user.uid)
+                .set(updates, SetOptions.merge())
+                .addOnSuccessListener {
+                    nombre = nuevoNombre
+                    telefono = nuevoTelefono
+                    if (urlFotoDescargada != null) {
+                        fotoUrl = urlFotoDescargada
+                    }
+                    estaGuardando = false
+                    onSuccess()
+                }
+                .addOnFailureListener { e ->
+                    estaGuardando = false
+                    onError(e.localizedMessage ?: "Error al actualizar la información en Firestore.")
+                }
+        }
+
+        if (nuevaFotoUri != null) {
+            val storageRef = storage.reference.child("profile_images/${user.uid}.jpg")
+
+            storageRef.putFile(nuevaFotoUri)
+                .addOnSuccessListener {
+                    storageRef.downloadUrl
+                        .addOnSuccessListener { downloadUri ->
+                            guardarEnFirestore(downloadUri.toString())
+                        }
+                        .addOnFailureListener { e ->
+                            estaGuardando = false
+                            onError(e.localizedMessage ?: "Error al obtener la URL de la imagen.")
+                        }
+                }
+                .addOnFailureListener { e ->
+                    estaGuardando = false
+                    onError(e.localizedMessage ?: "Error al subir la imagen de perfil.")
+                }
+        } else {
+            guardarEnFirestore()
+        }
     }
 
     fun publicarSolicitud(

@@ -21,67 +21,24 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-
-data class ReviewItem(
-    val id: String,
-    val nombre: String,
-    val fecha: String,
-    val calificacion: Int,
-    val comentario: String
-)
+import androidx.lifecycle.viewmodel.compose.viewModel
+import java.util.Locale
 
 @Composable
 fun ProviderReviewsScreen(
+    viewModel: ProviderViewModel = viewModel(),
     onBack: () -> Unit = {}
 ) {
     var selectedTab by remember { mutableIntStateOf(0) } // 0 = Recibidas de Clientes, 1 = Otorgadas a Clientes
 
-    val recibidasReviews = remember {
-        listOf(
-            ReviewItem(
-                id = "1",
-                nombre = "María López",
-                fecha = "12/08/2026",
-                calificacion = 5,
-                comentario = "Excelente servicio de plomería, resolvió la fuga del baño rápidamente y dejó todo impecable. Muy recomendado."
-            ),
-            ReviewItem(
-                id = "2",
-                nombre = "Juan Rodríguez",
-                fecha = "05/07/2026",
-                calificacion = 4,
-                comentario = "Buen trabajo y muy puntual. Solucionó el problema del calentador sin contratiempos."
-            ),
-            ReviewItem(
-                id = "3",
-                nombre = "Ana García",
-                fecha = "20/06/2026",
-                calificacion = 5,
-                comentario = "Excelente experiencia. Muy profesional, amable y con muy buenas herramientas de trabajo."
-            )
-        )
-    }
-
-    val otorgadasReviews = remember {
-        listOf(
-            ReviewItem(
-                id = "4",
-                nombre = "María López",
-                fecha = "12/08/2026",
-                calificacion = 5,
-                comentario = "Cliente muy amable, dio indicaciones claras para la llegada y realizó el pago oportunamente."
-            ),
-            ReviewItem(
-                id = "5",
-                nombre = "Juan Rodríguez",
-                fecha = "05/07/2026",
-                calificacion = 5,
-                comentario = "Excelente comunicación, lugar listo para trabajar y pago al instante."
-            )
-        )
-    }
+    val recibidasReviews = viewModel.listaResenasRecibidas
+    val otorgadasReviews = viewModel.listaResenasOtorgadas
+    val promedio = viewModel.promedioCalificacion
+    val totalResenas = viewModel.totalResenasCount
+    val estaCargando = viewModel.estaCargandoResenas
 
     val currentReviews = if (selectedTab == 0) recibidasReviews else otorgadasReviews
+    val promedioTexto = String.format(Locale.US, "%.1f", promedio)
 
     Scaffold(
         containerColor = Color(0xFFF8FAFC)
@@ -150,7 +107,7 @@ fun ProviderReviewsScreen(
                             modifier = Modifier.size(28.dp)
                         )
                         Text(
-                            text = "4.9",
+                            text = promedioTexto,
                             fontSize = 26.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFFFF8F00)
@@ -164,7 +121,7 @@ fun ProviderReviewsScreen(
                     }
 
                     Text(
-                        text = "Basado en 8 evaluaciones",
+                        text = "Basado en $totalResenas evaluación${if (totalResenas != 1) "es" else ""}",
                         fontSize = 14.sp,
                         color = Color(0xFF64748B)
                     )
@@ -221,12 +178,36 @@ fun ProviderReviewsScreen(
                 }
             }
 
-            // 4. LISTA DE RESEÑAS
-            Column(
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                currentReviews.forEach { review ->
-                    ReviewCard(review = review)
+            // 4. LISTA DE RESEÑAS / ESTADOS
+            if (estaCargando && currentReviews.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = Color(0xFFFF8F00))
+                }
+            } else if (currentReviews.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (selectedTab == 0) "Aún no has recibido reseñas de clientes." else "Aún no has otorgado reseñas.",
+                        fontSize = 14.sp,
+                        color = Color(0xFF94A3B8)
+                    )
+                }
+            } else {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    currentReviews.forEach { review ->
+                        ReviewCard(review = review)
+                    }
                 }
             }
         }
@@ -293,12 +274,14 @@ private fun ReviewCard(review: ReviewItem) {
                 }
             }
 
-            Text(
-                text = review.comentario,
-                fontSize = 14.sp,
-                color = Color(0xFF475569),
-                lineHeight = 20.sp
-            )
+            if (review.comentario.isNotBlank()) {
+                Text(
+                    text = review.comentario,
+                    fontSize = 14.sp,
+                    color = Color(0xFF475569),
+                    lineHeight = 20.sp
+                )
+            }
         }
     }
 }

@@ -3,6 +3,7 @@ package com.servixyabogota.data.repository
 import android.content.Context
 import android.net.Uri
 import android.webkit.MimeTypeMap
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.storage.FirebaseStorage
 import com.servixyabogota.data.model.Propuesta
@@ -18,7 +19,6 @@ class SolicitudRepository {
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance()
     private val storageRef = FirebaseStorage.getInstance().reference
 
-    // Función auxiliar para obtener la extensión del archivo según su Uri
     private fun obtenerExtension(context: Context, uri: Uri): String {
         return context.contentResolver.getType(uri)?.let { mime ->
             MimeTypeMap.getSingleton().getExtensionFromMimeType(mime)
@@ -100,9 +100,91 @@ class SolicitudRepository {
         }
     }
 
-    // ==========================================
-    // FUNCIONES PARA PRESTADORES
-    // ==========================================
+    /**
+     * Marca el servicio como COMPLETADO, registra la reseña/calificación con el nombre del cliente
+     * y recalcula el promedio de estrellas del prestador en Firestore.
+     */
+    /**
+     * Marca el servicio como COMPLETADO (ya sea en solicitudes o chats directos),
+     * registra la reseña en 'resenas' y recalcula el promedio de estrellas del prestador.
+     */
+    suspend fun completarServicioYCalificar(
+        solicitudId: String,
+        clienteId: String,
+        prestadorId: String,
+        calificacion: Int,
+        comentario: String,
+        clienteNombre: String = "",
+        esChatDirecto: Boolean = false
+    ): Result<Unit> = try {
+        val batch = db.batch()
+
+        val esDirecto = esChatDirecto || solicitudId.startsWith("chat_") || solicitudId.startsWith("direct_")
+
+        if (esDirecto) {
+            // 1a. Actualizar estado en la colección 'chats'
+            val chatRef = db.collection("chats").document(solicitudId)
+            batch.set(chatRef, mapOf(
+                "estado" to "COMPLETADA",
+                "fechaCompletada" to Timestamp.now()
+            ), com.google.firebase.firestore.SetOptions.merge())
+        } else {
+            // 1b. Actualizar estado en la colección 'solicitudes'
+            val solicitudRef = db.collection("solicitudes").document(solicitudId)
+            batch.update(solicitudRef, mapOf(
+                "estado" to "COMPLETADA",
+                "fechaCompletada" to Timestamp.now()
+            ))
+        }
+
+        // 2. Crear documento de reseña independiente (sirve tanto para chats como solicitudes)
+        val resenaRef = db.collection("resenas").document()
+        val nuevaResena = hashMapOf(
+            "solicitudId" to solicitudId,
+            "chatId" to solicitudId,
+            "clienteId" to clienteId,
+            "clienteNombre" to clienteNombre,
+            "prestadorId" to prestadorId,
+            "calificacion" to calificacion,
+            "comentario" to comentario,
+            "fecha" to Timestamp.now()
+        )
+        batch.set(resenaRef, nuevaResena)
+
+        // Guardar cambios en lote
+        batch.commit().await()
+
+        // 3. Recalcular el promedio total de estrellas del prestador
+        val resenasQuery = db.collection("resenas")
+            .whereEqualTo("prestadorId", prestadorId)
+            .get()
+            .await()
+
+        val docs = resenasQuery.documents
+        val totalResenas = docs.size
+
+        val suma = docs.sumOf { doc ->
+            (doc.get("calificacion") as? Number)?.toDouble() ?: calificacion.toDouble()
+        }
+        val nuevoPromedio = if (totalResenas > 0) suma / totalResenas else 5.0
+
+        // Actualizar perfil del prestador con los alias de calificaciones
+        db.collection("usuarios").document(prestadorId)
+            .update(
+                mapOf(
+                    "calificacion" to nuevoPromedio,
+                    "promedioCalificacion" to nuevoPromedio,
+                    "rating" to nuevoPromedio,
+                    "totalResenas" to totalResenas,
+                    "numeroResenas" to totalResenas
+                )
+            ).await()
+
+        Result.success(Unit)
+    } catch (e: Exception) {
+        android.util.Log.e("SolicitudRepository", "Error al completar y calificar: ${e.message}", e)
+        Result.failure(e)
+    }
 
     private fun normalizarTexto(texto: String): String {
         return texto.replace(Regex("[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]"), "")

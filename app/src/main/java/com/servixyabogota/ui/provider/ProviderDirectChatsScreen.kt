@@ -2,7 +2,6 @@ package com.servixyabogota.ui.provider
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -23,69 +22,27 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
-
-// Modelo Mock para el listado de chats recibidos por el prestador
-data class ProviderDirectChatMock(
-    val id: String,
-    val clientName: String,
-    val clientPhoto: String,
-    val serviceRequested: String,
-    val lastMessage: String,
-    val time: String,
-    val unreadCount: Int = 0,
-    val isOnline: Boolean = false
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProviderDirectChatsScreen(
-    onBack: (() -> Unit)? = null, // Opcional si es un tab principal
+    viewModel: ProviderViewModel = viewModel(),
+    onBack: (() -> Unit)? = null,
     onOpenChat: (chatId: String, clientName: String) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
 
-    // Mockup de mensajes recibidos de clientes
-    val mockChats = remember {
-        listOf(
-            ProviderDirectChatMock(
-                id = "chat_directo_1",
-                clientName = "María Fernanda",
-                clientPhoto = "https://i.pravatar.cc/150?img=5",
-                serviceRequested = "Consulta Plomería",
-                lastMessage = "¿Hola! Quería saber si tienes disponibilidad para mañana en la mañana?",
-                time = "10:45 AM",
-                unreadCount = 1,
-                isOnline = true
-            ),
-            ProviderDirectChatMock(
-                id = "chat_directo_2",
-                clientName = "Andrés Cepeda",
-                clientPhoto = "https://i.pravatar.cc/150?img=8",
-                serviceRequested = "Mantenimiento General",
-                lastMessage = "Muchas gracias por la información, te confirmo más tarde.",
-                time = "Ayer",
-                unreadCount = 0,
-                isOnline = false
-            ),
-            ProviderDirectChatMock(
-                id = "chat_directo_3",
-                clientName = "Camila Ruiz",
-                clientPhoto = "https://i.pravatar.cc/150?img=9",
-                serviceRequested = "Reparación Fuga",
-                lastMessage = "¿Podrías enviarme una estimación de precio?",
-                time = "20 Sep",
-                unreadCount = 0,
-                isOnline = true
-            )
-        )
-    }
+    // Leemos los chats en tiempo real de Firestore
+    val chatsReales = viewModel.listaChatsDirectos
+    val estaCargando = viewModel.estaCargandoChats
 
-    val chatsFiltrados = remember(searchQuery) {
-        if (searchQuery.isBlank()) mockChats
-        else mockChats.filter {
+    val chatsFiltrados = remember(searchQuery, chatsReales) {
+        if (searchQuery.isBlank()) chatsReales
+        else chatsReales.filter {
             it.clientName.contains(searchQuery, ignoreCase = true) ||
-                    it.serviceRequested.contains(searchQuery, ignoreCase = true)
+                    it.lastMessage.contains(searchQuery, ignoreCase = true)
         }
     }
 
@@ -101,7 +58,7 @@ fun ProviderDirectChatsScreen(
                             color = Color(0xFF0F172A)
                         )
                         Text(
-                            text = "${mockChats.size} conversaciones activas",
+                            text = "${chatsReales.size} conversaciones activas",
                             fontSize = 12.sp,
                             color = Color(0xFF64748B)
                         )
@@ -147,12 +104,23 @@ fun ProviderDirectChatsScreen(
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             )
 
-            if (chatsFiltrados.isEmpty()) {
+            if (estaCargando) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("No tienes mensajes directos por el momento.", color = Color(0xFF64748B), fontSize = 14.sp)
+                    CircularProgressIndicator(color = Color(0xFF2563EB))
+                }
+            } else if (chatsFiltrados.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (searchQuery.isNotBlank()) "No se encontraron mensajes" else "No tienes mensajes directos por el momento.",
+                        color = Color(0xFF64748B),
+                        fontSize = 14.sp
+                    )
                 }
             } else {
                 LazyColumn(
@@ -173,7 +141,7 @@ fun ProviderDirectChatsScreen(
 
 @Composable
 private fun ProviderChatItem(
-    chat: ProviderDirectChatMock,
+    chat: ProviderDirectChatUi,
     onClick: () -> Unit
 ) {
     Surface(
@@ -191,7 +159,7 @@ private fun ProviderChatItem(
             // Foto de perfil del Cliente
             Box(modifier = Modifier.size(52.dp)) {
                 AsyncImage(
-                    model = chat.clientPhoto,
+                    model = chat.clientPhoto.ifBlank { "https://i.pravatar.cc/150?img=33" },
                     contentDescription = chat.clientName,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
@@ -199,16 +167,6 @@ private fun ProviderChatItem(
                         .clip(CircleShape)
                         .background(Color(0xFFE2E8F0))
                 )
-                if (chat.isOnline) {
-                    Box(
-                        modifier = Modifier
-                            .size(14.dp)
-                            .align(Alignment.BottomEnd)
-                            .clip(CircleShape)
-                            .background(Color(0xFF22C55E))
-                            .border(2.dp, Color.White, CircleShape)
-                    )
-                }
             }
 
             Spacer(modifier = Modifier.width(12.dp))
@@ -231,57 +189,30 @@ private fun ProviderChatItem(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = chat.time,
+                        text = chat.timeFormatted,
                         fontSize = 12.sp,
-                        color = if (chat.unreadCount > 0) Color(0xFF2563EB) else Color(0xFF94A3B8),
-                        fontWeight = if (chat.unreadCount > 0) FontWeight.Bold else FontWeight.Normal
+                        color = Color(0xFF94A3B8)
                     )
                 }
 
                 Spacer(modifier = Modifier.height(2.dp))
 
                 Text(
-                    text = "Cliente • ${chat.serviceRequested}",
+                    text = "Contacto Directo",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
-                    color = Color(0xFF64748B)
+                    color = Color(0xFF2563EB)
                 )
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = chat.lastMessage,
-                        fontSize = 13.sp,
-                        color = if (chat.unreadCount > 0) Color(0xFF1E293B) else Color(0xFF64748B),
-                        fontWeight = if (chat.unreadCount > 0) FontWeight.Medium else FontWeight.Normal,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    if (chat.unreadCount > 0) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Box(
-                            modifier = Modifier
-                                .size(20.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF2563EB)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = chat.unreadCount.toString(),
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
+                Text(
+                    text = chat.lastMessage,
+                    fontSize = 13.sp,
+                    color = Color(0xFF64748B),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }

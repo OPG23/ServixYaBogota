@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -44,32 +45,49 @@ fun ChatScreen(
     val uiState by viewModel.uiState.collectAsState()
     var mensajeTexto by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
-    // Dentro de ChatScreen.kt:
+    val coroutineScope = rememberCoroutineScope()
 
-// Color primario según la identidad
-    val colorTema = if (esCliente) Color(0xFF1976D2) else Color(0xFFFF8F00) // Azul para Cliente, Naranja para Prestador
-    val colorBurbujaPropia = if (esCliente) Color(0xFFE3F2FD) else Color(0xFFFFF3E0)
+    // Estados vinculados a las IDs del chat para que se reinicien automáticamente al cambiar de conversación
+    var isPrimeraCarga by remember(solicitudId, currentUserId) { mutableStateOf(true) }
+    var mensajesConocidosIds by remember(solicitudId, currentUserId) { mutableStateOf(setOf<String>()) }
 
-    // Cargar datos en vivo
-    LaunchedEffect(solicitudId, currentUserId) {
+    // Nombre por defecto según el rol en caso de estar cargando
+    val nombrePorDefecto = if (esCliente) "Prestador" else "Cliente"
+
+    // Inicializar viewModel cuando cambien las IDs
+    LaunchedEffect(solicitudId, currentUserId, esCliente) {
         viewModel.inicializarChat(
-            solicitudId = solicitudId,
+            chatId = solicitudId,
             currentUserId = currentUserId,
             esCliente = esCliente
         )
     }
 
-    // Auto-scroll al enviar o recibir mensajes
-    LaunchedEffect(uiState.mensajes.size) {
-        if (uiState.mensajes.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.mensajes.size - 1)
+    // Scroll automático al cargar el chat o al recibir nuevos mensajes
+    LaunchedEffect(uiState.mensajes, uiState.isLoading) {
+        if (uiState.isLoading) return@LaunchedEffect
+
+        val mensajes = uiState.mensajes
+        if (mensajes.isNotEmpty()) {
+            val idsActuales = mensajes.map { it.id }.toSet()
+
+            if (isPrimeraCarga) {
+                mensajesConocidosIds = idsActuales
+                listState.scrollToItem(mensajes.size - 1)
+                isPrimeraCarga = false
+            } else {
+                val nuevosIds = idsActuales - mensajesConocidosIds
+                if (nuevosIds.isNotEmpty()) {
+                    listState.animateScrollToItem(mensajes.size - 1)
+                    mensajesConocidosIds = idsActuales
+                }
+            }
         }
     }
 
     Scaffold(
         topBar = {
             Column {
-                // 1. TOP BAR PRINCIPAL
                 Surface(
                     color = Color.White,
                     shadowElevation = 1.dp
@@ -95,7 +113,6 @@ fun ChatScreen(
                                 )
                             }
 
-                            // Avatar con indicador de 'En línea'
                             Box {
                                 Surface(
                                     modifier = Modifier.size(42.dp),
@@ -114,7 +131,8 @@ fun ChatScreen(
                                             contentAlignment = Alignment.Center,
                                             modifier = Modifier.fillMaxSize()
                                         ) {
-                                            val inicial = uiState.nombreContraparte.trim().take(1).uppercase().ifBlank { "C" }
+                                            val nombreAMostrar = uiState.nombreContraparte.ifBlank { nombrePorDefecto }
+                                            val inicial = nombreAMostrar.trim().take(1).uppercase()
                                             Text(
                                                 text = inicial,
                                                 fontWeight = FontWeight.Bold,
@@ -125,7 +143,6 @@ fun ChatScreen(
                                     }
                                 }
 
-                                // Punto verde 'En línea'
                                 Box(
                                     modifier = Modifier
                                         .size(11.dp)
@@ -140,7 +157,7 @@ fun ChatScreen(
 
                             Column {
                                 Text(
-                                    text = uiState.nombreContraparte.ifBlank { "Carlos Pérez" },
+                                    text = uiState.nombreContraparte.ifBlank { nombrePorDefecto },
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF111827)
@@ -165,7 +182,6 @@ fun ChatScreen(
                     }
                 }
 
-                // 2. BANNER INFORMATIVO DE LA SOLICITUD
                 Surface(
                     color = Color(0xFFE3F2FD),
                     modifier = Modifier.fillMaxWidth()
@@ -182,7 +198,7 @@ fun ChatScreen(
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = "Solicitud - ${categoriaSolicitud.ifBlank { "Plomería" }}",
+                            text = "Solicitud - ${categoriaSolicitud.ifBlank { "General" }}",
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
                             color = Color(0xFF0D47A1)
@@ -192,7 +208,6 @@ fun ChatScreen(
             }
         },
         bottomBar = {
-            // BARRA DE INPUT DE MENSAJE
             Surface(
                 color = Color.White,
                 modifier = Modifier
@@ -244,6 +259,11 @@ fun ChatScreen(
                             if (mensajeTexto.isNotBlank()) {
                                 viewModel.enviarMensaje(mensajeTexto)
                                 mensajeTexto = ""
+                                coroutineScope.launch {
+                                    if (uiState.mensajes.isNotEmpty()) {
+                                        listState.animateScrollToItem(uiState.mensajes.size - 1)
+                                    }
+                                }
                             }
                         },
                         enabled = mensajeTexto.isNotBlank(),
@@ -296,7 +316,9 @@ fun ChatScreen(
                             esMio = esMio,
                             esCliente = esCliente,
                             estadoPropuesta = uiState.estadoPropuesta,
-                            onConfirmarServicio = { viewModel.aceptarPropuesta() }
+                            onConfirmarServicio = {
+                                viewModel.responderOferta(mensaje.id, true)
+                            }
                         )
                     }
                 }
@@ -322,7 +344,6 @@ private fun BurbujaMensajeExacta(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (esMio) Alignment.End else Alignment.Start
     ) {
-        // Burbuja de texto
         Surface(
             color = if (esMio) Color(0xFF1E88E5) else Color(0xFFE5E5E5),
             shape = RoundedCornerShape(16.dp),
@@ -339,7 +360,6 @@ private fun BurbujaMensajeExacta(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // Hora y Double Checkmark
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(3.dp),
@@ -361,7 +381,6 @@ private fun BurbujaMensajeExacta(
             }
         }
 
-        // MOSTRAR BOTÓN "Confirmar Servicio" SI CORRESPONDE A UNA OFERTA/PROPUESTA
         if (!esMio && esCliente && (mensaje.esPropuesta || mensaje.montoPropuesta > 0) && estadoPropuesta == "PENDIENTE") {
             Spacer(modifier = Modifier.height(8.dp))
 

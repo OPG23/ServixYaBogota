@@ -6,11 +6,13 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,9 +26,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.google.firebase.Timestamp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
-// Modelo de datos Mock para Chats Directos
-data class DirectChatMock(
+// Modelo de datos para Chats Directos
+data class DirectChatUi(
     val id: String,
     val providerName: String,
     val providerPhoto: String,
@@ -34,69 +42,122 @@ data class DirectChatMock(
     val lastMessage: String,
     val time: String,
     val unreadCount: Int = 0,
-    val isOnline: Boolean = false
+    val isOnline: Boolean = false,
+    val providerId: String = ""
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ClientDirectChatsScreen(
     onBack: () -> Unit,
-    onOpenChat: (chatId: String, providerName: String) -> Unit
+    onOpenChat: (chatId: String, providerName: String, providerId: String) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf("Todas") }
+    var realChats by remember { mutableStateOf<List<DirectChatUi>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
 
-    // Mockup de chats directos iniciados desde el perfil de prestadores
-    val mockChats = remember {
-        listOf(
-            DirectChatMock(
-                id = "chat_1",
-                providerName = "Carlos Mendoza",
-                providerPhoto = "https://i.pravatar.cc/150?img=12",
-                category = "Plomería",
-                lastMessage = "Hola, claro que sí. Puedo pasar hoy a las 3:00 pm a revisar la fuga.",
-                time = "10:42 AM",
-                unreadCount = 2,
-                isOnline = true
-            ),
-            DirectChatMock(
-                id = "chat_2",
-                providerName = "Ana María Gómez",
-                providerPhoto = "https://i.pravatar.cc/150?img=47",
-                category = "Electricidad",
-                lastMessage = "¿A qué hora te quedaría bien que revise el tablero eléctrico?",
-                time = "Ayer",
-                unreadCount = 0,
-                isOnline = false
-            ),
-            DirectChatMock(
-                id = "chat_3",
-                providerName = "Jorge Ramírez",
-                providerPhoto = "https://i.pravatar.cc/150?img=33",
-                category = "Cerrajería",
-                lastMessage = "El costo del cambio de clave de la cerradura es de $80.000.",
-                time = "18 Sep",
-                unreadCount = 0,
-                isOnline = true
-            ),
-            DirectChatMock(
-                id = "chat_4",
-                providerName = "Laura Restrepo",
-                providerPhoto = "https://i.pravatar.cc/150?img=25",
-                category = "Pintura",
-                lastMessage = "Perfecto, te envío la cotización con los materiales incluidos.",
-                time = "15 Sep",
-                unreadCount = 0,
-                isOnline = false
-            )
-        )
+    val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
+    val db = remember { FirebaseFirestore.getInstance() }
+
+    // Escuchar chats directos del cliente en tiempo real
+    DisposableEffect(currentUserId) {
+        if (currentUserId.isBlank()) {
+            isLoading = false
+            onDispose { }
+        } else {
+            val listener = db.collection("chats")
+                .whereEqualTo("clienteId", currentUserId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error == null && snapshot != null) {
+                        val documents = snapshot.documents
+                        if (documents.isEmpty()) {
+                            realChats = emptyList()
+                            isLoading = false
+                        } else {
+                            val tempList = mutableListOf<DirectChatUi>()
+                            var processedCount = 0
+
+                            for (doc in documents) {
+                                val chatId = doc.id
+                                val prestadorId = doc.getString("prestadorId") ?: ""
+                                val ultimoMsg = doc.getString("ultimoMensaje") ?: "Conversación iniciada"
+                                val timestamp = doc.getTimestamp("fechaUltimoMensaje")
+                                val noLeidos = doc.getLong("noLeidosCliente")?.toInt() ?: 0
+                                val horaFormateada = formatearFecha(timestamp)
+
+                                if (prestadorId.isNotBlank()) {
+                                    db.collection("usuarios").document(prestadorId).get()
+                                        .addOnSuccessListener { providerDoc ->
+                                            val nombrePrestador = providerDoc.getString("nombreCompleto")
+                                                ?: providerDoc.getString("nombre")
+                                                ?: "Prestador"
+                                            val fotoPrestador = providerDoc.getString("fotoUrl")
+                                                ?: providerDoc.getString("foto")
+                                                ?: ""
+                                            val categoriaPrestador = providerDoc.getString("profesion")
+                                                ?: providerDoc.getString("categoria")
+                                                ?: providerDoc.getString("especialidad")
+                                                ?: "Servicio"
+
+                                            tempList.add(
+                                                DirectChatUi(
+                                                    id = chatId,
+                                                    providerName = nombrePrestador,
+                                                    providerPhoto = fotoPrestador,
+                                                    category = categoriaPrestador,
+                                                    lastMessage = ultimoMsg,
+                                                    time = horaFormateada,
+                                                    unreadCount = noLeidos,
+                                                    isOnline = false,
+                                                    providerId = prestadorId
+                                                )
+                                            )
+                                            processedCount++
+                                            if (processedCount == documents.size) {
+                                                realChats = tempList
+                                                isLoading = false
+                                            }
+                                        }
+                                        .addOnFailureListener {
+                                            processedCount++
+                                            if (processedCount == documents.size) {
+                                                realChats = tempList
+                                                isLoading = false
+                                            }
+                                        }
+                                } else {
+                                    processedCount++
+                                    if (processedCount == documents.size) {
+                                        realChats = tempList
+                                        isLoading = false
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        isLoading = false
+                    }
+                }
+
+            onDispose {
+                listener.remove()
+            }
+        }
     }
 
-    // Filtrado en tiempo real según el buscador
-    val chatsFiltrados = remember(searchQuery) {
-        if (searchQuery.isBlank()) mockChats
-        else mockChats.filter {
-            it.providerName.contains(searchQuery, ignoreCase = true) ||
-                    it.category.contains(searchQuery, ignoreCase = true)
+    // Filtrado en tiempo real según el buscador y la categoría seleccionada
+    val chatsFiltrados = remember(searchQuery, selectedCategory, realChats) {
+        realChats.filter { chat ->
+            val coincideBusqueda = searchQuery.isBlank() ||
+                    chat.providerName.contains(searchQuery, ignoreCase = true) ||
+                    chat.category.contains(searchQuery, ignoreCase = true)
+
+            val coincideCategoria = selectedCategory == "Todas" ||
+                    chat.category.contains(selectedCategory, ignoreCase = true) ||
+                    selectedCategory.contains(chat.category, ignoreCase = true)
+
+            coincideBusqueda && coincideCategoria
         }
     }
 
@@ -112,7 +173,7 @@ fun ClientDirectChatsScreen(
                             color = Color(0xFF0F172A)
                         )
                         Text(
-                            text = "${mockChats.size} conversaciones",
+                            text = "${realChats.size} conversaciones",
                             fontSize = 12.sp,
                             color = Color(0xFF64748B)
                         )
@@ -137,7 +198,7 @@ fun ClientDirectChatsScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Buscador
+            // 1. Buscador
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
@@ -153,10 +214,25 @@ fun ClientDirectChatsScreen(
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
-            if (chatsFiltrados.isEmpty()) {
+            // 2. Barra de Filtro de Categorías
+            CategoryFilterChips(
+                selectedCategory = selectedCategory,
+                onCategorySelected = { selectedCategory = it },
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+
+            // 3. Contenido Principal
+            if (isLoading) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = Color(0xFF2563EB))
+                }
+            } else if (chatsFiltrados.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -164,7 +240,11 @@ fun ClientDirectChatsScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "No se encontraron conversaciones.",
+                        text = if (searchQuery.isBlank() && selectedCategory == "Todas") {
+                            "No tienes conversaciones directas activas."
+                        } else {
+                            "No se encontraron conversaciones con el filtro seleccionado."
+                        },
                         color = Color(0xFF64748B),
                         fontSize = 14.sp
                     )
@@ -177,7 +257,7 @@ fun ClientDirectChatsScreen(
                     items(chatsFiltrados, key = { it.id }) { chat ->
                         DirectChatItem(
                             chat = chat,
-                            onClick = { onOpenChat(chat.id, chat.providerName) }
+                            onClick = { onOpenChat(chat.id, chat.providerName, chat.providerId) }
                         )
                     }
                 }
@@ -186,9 +266,83 @@ fun ClientDirectChatsScreen(
     }
 }
 
+// ==========================================
+// COMPOSABLE: BARRA DE FILTROS DE CATEGORÍA
+// ==========================================
+
+@Composable
+fun CategoryFilterChips(
+    selectedCategory: String,
+    onCategorySelected: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val categories = listOf(
+        "Todas" to "✨",
+        "Plomería" to "🪠",
+        "Electricidad" to "⚡",
+        "Cerrajería" to "🔑",
+        "Pintura" to "🎨",
+        "Aseo y Limpieza" to "🧹",
+        "Reparación de Electrodomésticos" to "🔌",
+        "Carpintería" to "🪚"
+    )
+
+    LazyRow(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp)
+    ) {
+        items(categories) { (nombre, emoji) ->
+            val isSelected = selectedCategory == nombre
+
+            Surface(
+                onClick = { onCategorySelected(nombre) },
+                shape = RoundedCornerShape(20.dp),
+                color = if (isSelected) Color(0xFF2563EB) else Color.White,
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = if (isSelected) Color(0xFF2563EB) else Color(0xFFE2E8F0)
+                ),
+                shadowElevation = if (isSelected) 1.dp else 0.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(text = emoji, fontSize = 13.sp)
+                    Text(
+                        text = nombre,
+                        fontSize = 13.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSelected) Color.White else Color(0xFF334155)
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun formatearFecha(timestamp: Timestamp?): String {
+    if (timestamp == null) return ""
+    val fecha = timestamp.toDate()
+    val ahora = Calendar.getInstance()
+    val calFecha = Calendar.getInstance().apply { time = fecha }
+
+    return if (ahora.get(Calendar.YEAR) == calFecha.get(Calendar.YEAR) &&
+        ahora.get(Calendar.DAY_OF_YEAR) == calFecha.get(Calendar.DAY_OF_YEAR)) {
+        SimpleDateFormat("hh:mm a", Locale.getDefault()).format(fecha)
+    } else if (ahora.get(Calendar.YEAR) == calFecha.get(Calendar.YEAR) &&
+        ahora.get(Calendar.DAY_OF_YEAR) - calFecha.get(Calendar.DAY_OF_YEAR) == 1) {
+        "Ayer"
+    } else {
+        SimpleDateFormat("dd/MM/yy", Locale.getDefault()).format(fecha)
+    }
+}
+
 @Composable
 private fun DirectChatItem(
-    chat: DirectChatMock,
+    chat: DirectChatUi,
     onClick: () -> Unit
 ) {
     Surface(
@@ -203,17 +357,35 @@ private fun DirectChatItem(
             modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Foto de perfil con indicador de línea
+            // Foto de perfil
             Box(modifier = Modifier.size(52.dp)) {
-                AsyncImage(
-                    model = chat.providerPhoto,
-                    contentDescription = chat.providerName,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape)
-                        .background(Color(0xFFE2E8F0))
-                )
+                if (chat.providerPhoto.isNotBlank()) {
+                    AsyncImage(
+                        model = chat.providerPhoto,
+                        contentDescription = chat.providerName,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                            .background(Color(0xFFE2E8F0))
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                            .background(Color(0xFFE2E8F0)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = null,
+                            tint = Color(0xFF64748B),
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                }
+
                 if (chat.isOnline) {
                     Box(
                         modifier = Modifier
@@ -265,7 +437,7 @@ private fun DirectChatItem(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                // Último mensaje y badge de mensajes no leídos
+                // Último mensaje y contador de no leídos
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,

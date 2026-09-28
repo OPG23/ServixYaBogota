@@ -11,6 +11,8 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -35,9 +37,15 @@ fun ProviderMainContainer(
     val context = LocalContext.current
     val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
 
-    // Obtenemos el estado de forma segura e inferida
+    // Obtenemos el estado del perfil desde el ViewModel
     val uiStateState = viewModel.uiState.observeAsState(EstadoProveedorUiState())
     val uiState = uiStateState.value ?: EstadoProveedorUiState()
+
+    // Obtenemos la lista en vivo de solicitudes según las categorías y localidades del prestador
+    val solicitudesDisponibles by viewModel.getSolicitudesDisponibles(
+        misCategorias = uiState.categorias,
+        misLocalidades = uiState.localidades
+    ).collectAsState(initial = emptyList())
 
     // NAVEGACIÓN PRINCIPAL
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Trabajos, 1: Mensajes, 2: Historial, 3: Perfil
@@ -130,20 +138,45 @@ fun ProviderMainContainer(
 
     // 1. SI HAY UN CHAT ACTIVO: Superpone ChatDetailScreen
     if (activeChat != null) {
+        val currentChat = activeChat!!
+
         ChatDetailScreen(
-            chatId = activeChat!!.id,
+            chatId = currentChat.id,
             currentUserId = currentUserId,
             esCliente = false,
-            interlocutorNombre = activeChat!!.nombreCliente,
-            solicitudInfo = activeChat!!.tituloSolicitud,
-            actionButtonText = if (activeChat!!.tituloSolicitud != null) "Enviar Cotización" else null,
-            onActionButtonClick = {
-                Toast.makeText(context, "Creando cotización para ${activeChat!!.nombreCliente}...", Toast.LENGTH_SHORT).show()
-            },
+            interlocutorNombre = currentChat.nombreCliente,
+            solicitudInfo = currentChat.tituloSolicitud,
+            onVerSolicitudClick = if (!currentChat.tituloSolicitud.isNullOrEmpty()) {
+                {
+                    // 1. Intentamos buscarla primero en la lista local disponible
+                    val localFound = solicitudesDisponibles.find { it.id == currentChat.id }
+
+                    if (localFound != null) {
+                        solicitudSeleccionada = localFound
+                        activeChat = null // Cerramos el chat para mostrar el detalle
+                    } else {
+                        // 2. Si pasó a EN_PROCESO y ya no está disponible públicamente,
+                        // la traemos directamente desde Firestore usando su ID.
+                        viewModel.obtenerSolicitudPorId(currentChat.id) { solicitudCargada ->
+                            if (solicitudCargada != null) {
+                                solicitudSeleccionada = solicitudCargada
+                                activeChat = null // Cerramos el chat para abrir la solicitud completa
+                            } else {
+                                Toast.makeText(
+                                    context,
+                                    "No se pudo cargar la información de la solicitud.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    }
+                }
+            } else null,
             viewModel = chatViewModel,
             onBack = { activeChat = null }
         )
     }
+
     // 2. SI EL PRESTADOR ESTÁ APROBADO: Muestra la App Principal
     else if (uiState.estadoVerificacion == "APROBADO") {
         // Sub-pantalla de Detalle de Solicitud (al pulsar postularme)
@@ -151,9 +184,19 @@ fun ProviderMainContainer(
             DetalleSolicitudScreen(
                 solicitud = solicitudSeleccionada!!,
                 onBack = { solicitudSeleccionada = null },
-                onConfirmarPostulacion = { _ ->
-                    Toast.makeText(context, "Postulación enviada correctamente", Toast.LENGTH_SHORT).show()
-                    solicitudSeleccionada = null
+                onConfirmarPostulacion = { monto, propuesta ->
+                    viewModel.postularASolicitud(
+                        solicitudId = solicitudSeleccionada!!.id,
+                        montoPropuesta = monto,
+                        mensajePresentacion = propuesta,
+                        onSuccess = {
+                            Toast.makeText(context, "¡Postulación enviada con éxito!", Toast.LENGTH_SHORT).show()
+                            solicitudSeleccionada = null // Cierra el detalle y vuelve al listado
+                        },
+                        onError = { mensajeError ->
+                            Toast.makeText(context, mensajeError, Toast.LENGTH_LONG).show()
+                        }
+                    )
                 }
             )
         } else {

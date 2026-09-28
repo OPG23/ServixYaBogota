@@ -1,10 +1,11 @@
 package com.servixyabogota.ui.client
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -27,7 +28,7 @@ import java.util.Date
 import java.util.concurrent.TimeUnit
 
 // ==========================================
-// SCREEN PRINCIPAL: MIS SOLICITUDES
+// SCREEN PRINCIPAL: MIS SOLICITUDES / PROPUESTAS
 // ==========================================
 
 @Composable
@@ -39,13 +40,15 @@ fun ClientRequestsScreen(
     onVerChatClick: (Solicitud) -> Unit = {},
     onNavigateTab: (String) -> Unit = {}
 ) {
-    val context = LocalContext.current // <-- OBTENEMOS EL CONTEXTO DE LA APLICACIÓN
+    val context = LocalContext.current
 
-    var filtroSeleccionado by remember { mutableStateOf("Abiertas") }
+    var filtroEstadoSeleccionado by remember { mutableStateOf("Abiertas") }
+    var categoriaSeleccionada by remember { mutableStateOf("Todas") }
+
     var solicitudAEditar by remember { mutableStateOf<Solicitud?>(null) }
     var solicitudACancelar by remember { mutableStateOf<Solicitud?>(null) }
 
-    // 1. SI SE HACE CLIC EN EDITAR, MUESTRA CREATEREQUESTSCREEN A PANTALLA COMPLETA
+    // SI SE HACE CLIC EN EDITAR, MUESTRA CREATEREQUESTSCREEN
     val solicitudParaEditar = solicitudAEditar
     if (solicitudParaEditar != null) {
         CreateRequestScreen(
@@ -60,7 +63,7 @@ fun ClientRequestsScreen(
                     direccion = dir,
                     localidad = loc,
                     archivos = archivos,
-                    context = context, // <-- PARÁMETRO 'context' AGREGADO
+                    context = context,
                     onSuccess = { solicitudAEditar = null },
                     onError = { /* Manejar error si ocurre */ }
                 )
@@ -69,7 +72,7 @@ fun ClientRequestsScreen(
         return
     }
 
-    // 1. Obtener UID del usuario autenticado actual PRIMERO
+    // 1. Obtener UID del usuario autenticado actual
     val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
 
     // 2. Obtener la lista original desde el ViewModel
@@ -95,13 +98,24 @@ fun ClientRequestsScreen(
         }
     }
 
-    val solicitudesFiltradas = when (filtroSeleccionado) {
-        "Abiertas" -> abiertas
-        "En Proceso" -> enProceso
-        else -> historial
+    // 5. Filtrado combinado por Estado + Categoría
+    val solicitudesFiltradas = remember(filtroEstadoSeleccionado, categoriaSeleccionada, listaSolicitudes) {
+        val porEstado = when (filtroEstadoSeleccionado) {
+            "Abiertas" -> abiertas
+            "En Proceso" -> enProceso
+            else -> historial
+        }
+
+        if (categoriaSeleccionada == "Todas") {
+            porEstado
+        } else {
+            porEstado.filter { solicitud ->
+                solicitud.categoria.contains(categoriaSeleccionada, ignoreCase = true) ||
+                        categoriaSeleccionada.contains(solicitud.categoria, ignoreCase = true)
+            }
+        }
     }
 
-    // 2. INTERFAZ PRINCIPAL CUANDO NO SE ESTÁ EDITANDO
     Scaffold(
         bottomBar = {
             ClientBottomNavigation(
@@ -120,13 +134,15 @@ fun ClientRequestsScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .statusBarsPadding(),
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
+                contentPadding = PaddingValues(bottom = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // ENCABEZADO
                 item {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -160,14 +176,22 @@ fun ClientRequestsScreen(
                     }
                 }
 
-                // TABS DE FILTRO (Abiertas, En Proceso, Historial)
+                // FILTRO DE CATEGORÍAS (Reutilizado de ClientDirectChatsScreen.kt)
+                item {
+                    CategoryFilterChips(
+                        selectedCategory = categoriaSeleccionada,
+                        onCategorySelected = { categoriaSeleccionada = it }
+                    )
+                }
+
+                // TABS DE ESTADO (Abiertas, En Proceso, Historial)
                 item {
                     Surface(
                         color = Color(0xFFF1F5F9),
                         shape = RoundedCornerShape(24.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 4.dp)
+                            .padding(horizontal = 20.dp)
                     ) {
                         Row(
                             modifier = Modifier
@@ -182,13 +206,13 @@ fun ClientRequestsScreen(
                             )
 
                             tabs.forEach { (key, label) ->
-                                val isSelected = filtroSeleccionado == key
+                                val isSelected = filtroEstadoSeleccionado == key
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
                                         .clip(RoundedCornerShape(20.dp))
                                         .background(if (isSelected) Color(0xFF2563EB) else Color.Transparent)
-                                        .clickable { filtroSeleccionado = key }
+                                        .clickable { filtroEstadoSeleccionado = key }
                                         .padding(vertical = 10.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -204,17 +228,21 @@ fun ClientRequestsScreen(
                     }
                 }
 
-                // Mensaje estado vacío
+                // MENSAJE DE ESTADO VACÍO
                 if (solicitudesFiltradas.isEmpty()) {
                     item {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 40.dp),
+                                .padding(top = 40.dp, start = 20.dp, end = 20.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "No tienes solicitudes en esta categoría",
+                                text = if (categoriaSeleccionada == "Todas") {
+                                    "No tienes solicitudes en esta categoría de estado"
+                                } else {
+                                    "No hay solicitudes de '$categoriaSeleccionada' en este filtro"
+                                },
                                 color = Color(0xFF94A3B8),
                                 fontSize = 14.sp
                             )
@@ -222,13 +250,16 @@ fun ClientRequestsScreen(
                     }
                 } else {
                     // TARJETAS DE SOLICITUDES
-                    items(solicitudesFiltradas, key = { it.id }) { solicitud ->
-                        SolicitudCardItem(
-                            solicitud = solicitud,
-                            onEditarClick = { solicitudAEditar = solicitud },
-                            onCancelarClick = { solicitudACancelar = solicitud },
-                            onVerChatClick = { onVerChatClick(solicitud) }
-                        )
+                    items(solicitudesFiltradas.size, key = { solicitudesFiltradas[it].id }) { index ->
+                        val solicitud = solicitudesFiltradas[index]
+                        Box(modifier = Modifier.padding(horizontal = 20.dp)) {
+                            SolicitudCardItem(
+                                solicitud = solicitud,
+                                onEditarClick = { solicitudAEditar = solicitud },
+                                onCancelarClick = { solicitudACancelar = solicitud },
+                                onVerChatClick = { onVerChatClick(solicitud) }
+                            )
+                        }
                     }
                 }
             }
@@ -271,11 +302,13 @@ private fun SolicitudCardItem(
     onCancelarClick: () -> Unit,
     onVerChatClick: () -> Unit
 ) {
+    val esProceso = esEstadoEnProceso(solicitud.estado)
+
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1F5F9)),
+        border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -314,7 +347,7 @@ private fun SolicitudCardItem(
                 val estadoTextoLimpio = obtenerEstadoTexto(solicitud.estado)
                 val (estadoBg, estadoTextColor, estadoTexto) = when {
                     esEstadoPendiente(solicitud.estado) -> Triple(Color(0xFFEFF6FF), Color(0xFF2563EB), "ABIERTA")
-                    esEstadoEnProceso(solicitud.estado) -> Triple(Color(0xFFDCFCE7), Color(0xFF16A34A), "EN PROCESO")
+                    esProceso -> Triple(Color(0xFFDCFCE7), Color(0xFF16A34A), "EN PROCESO")
                     estadoTextoLimpio.contains("CANCEL") -> Triple(Color(0xFFFEE2E2), Color(0xFFEF4444), "CANCELADA")
                     else -> Triple(Color(0xFFF1F5F9), Color(0xFF64748B), "COMPLETADA")
                 }
@@ -363,6 +396,34 @@ private fun SolicitudCardItem(
                 color = Color(0xFF94A3B8)
             )
 
+            // Indicador de mensajes no leídos cuando la solicitud está EN_PROCESO
+            if (esProceso) {
+                val tieneMensajesNuevos = solicitud.noLeidosCliente > 0
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(
+                                if (tieneMensajesNuevos) Color(0xFF16A34A) else Color(0xFF94A3B8),
+                                CircleShape
+                            )
+                    )
+                    Text(
+                        text = if (tieneMensajesNuevos) {
+                            if (solicitud.noLeidosCliente == 1) "1 mensaje nuevo" else "${solicitud.noLeidosCliente} mensajes nuevos"
+                        } else {
+                            "Sin mensajes nuevos"
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (tieneMensajesNuevos) Color(0xFF16A34A) else Color(0xFF64748B)
+                    )
+                }
+            }
+
             HorizontalDivider(
                 color = Color(0xFFF1F5F9),
                 thickness = 1.dp,
@@ -377,7 +438,7 @@ private fun SolicitudCardItem(
                     OutlinedButton(
                         onClick = onEditarClick,
                         shape = RoundedCornerShape(10.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                         colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White),
                         modifier = Modifier.weight(1f)
                     ) {
@@ -392,7 +453,7 @@ private fun SolicitudCardItem(
                     OutlinedButton(
                         onClick = onCancelarClick,
                         shape = RoundedCornerShape(10.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFCA5A5)),
+                        border = BorderStroke(1.dp, Color(0xFFFCA5A5)),
                         colors = ButtonDefaults.outlinedButtonColors(containerColor = Color.White),
                         modifier = Modifier.weight(1f)
                     ) {
@@ -404,7 +465,7 @@ private fun SolicitudCardItem(
                         )
                     }
                 }
-            } else if (esEstadoEnProceso(solicitud.estado)) {
+            } else if (esProceso) {
                 Button(
                     onClick = onVerChatClick,
                     shape = RoundedCornerShape(10.dp),
@@ -419,7 +480,7 @@ private fun SolicitudCardItem(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Ver Chat / Prestador",
+                        text = "Abrir Chat de Servicio",
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
@@ -458,7 +519,7 @@ private fun obtenerIconoCategoria(categoria: String): ImageVector {
         "electricidad" -> Icons.Outlined.ElectricBolt
         "cerrajería", "cerrajeria" -> Icons.Outlined.Build
         "pintura" -> Icons.Outlined.FormatPaint
-        "limpieza" -> Icons.Outlined.CleaningServices
+        "limpieza", "aseo y limpieza" -> Icons.Outlined.CleaningServices
         else -> Icons.Outlined.Handyman
     }
 }

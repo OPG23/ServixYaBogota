@@ -1,6 +1,10 @@
 package com.servixyabogota.ui.client
 
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,6 +28,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -41,9 +47,18 @@ fun ClientProfileScreen(
 
     var nombre by remember(viewModel.nombre) { mutableStateOf(viewModel.nombre) }
     var telefono by remember(viewModel.telefono) { mutableStateOf(viewModel.telefono) }
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var showLogoutDialog by remember { mutableStateOf(false) }
 
-    // Diálogo de Confirmación para Cerrar Sesión
+    // Launcher para seleccionar la foto desde la galería
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            selectedImageUri = uri
+        }
+    }
+
     if (showLogoutDialog) {
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
@@ -85,7 +100,9 @@ fun ClientProfileScreen(
                             viewModel.guardarCambiosPerfil(
                                 nuevoNombre = nombre,
                                 nuevoTelefono = telefono,
+                                nuevaFotoUri = selectedImageUri,
                                 onSuccess = {
+                                    selectedImageUri = null
                                     Toast.makeText(context, "¡Perfil actualizado correctamente!", Toast.LENGTH_SHORT).show()
                                 },
                                 onError = { errorMsg ->
@@ -138,7 +155,7 @@ fun ClientProfileScreen(
                     .padding(horizontal = 20.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                // 1. ENCABEZADO
+                // ENCABEZADO
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -171,56 +188,37 @@ fun ClientProfileScreen(
                     Spacer(modifier = Modifier.width(40.dp))
                 }
 
-                // 2. FOTO DE PERFIL E INFORMACIÓN BÁSICA
+                // FOTO DE PERFIL E INICIALES
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Box(contentAlignment = Alignment.BottomEnd) {
-                        if (viewModel.fotoUrl.isNotEmpty()) {
-                            AsyncImage(
-                                model = viewModel.fotoUrl,
-                                contentDescription = "Foto de perfil",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(90.dp)
-                                    .clip(CircleShape)
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .size(90.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFCBD5E1)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.Person,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(54.dp)
-                                )
-                            }
-                        }
+                        val fotoAMostrar = selectedImageUri?.toString() ?: viewModel.fotoUrl
+
+                        UserAvatar(
+                            fotoUrl = fotoAMostrar,
+                            nombre = if (nombre.isNotBlank()) nombre else "Usuario",
+                            size = 90.dp,
+                            fontSize = 32.sp
+                        )
 
                         // Botón de cámara
                         Box(
                             modifier = Modifier
-                                .size(28.dp)
+                                .size(30.dp)
                                 .clip(CircleShape)
                                 .background(Color(0xFF2563EB))
                                 .border(2.dp, Color.White, CircleShape)
-                                .clickable {
-                                    Toast.makeText(context, "Próximamente: Cambiar foto de perfil", Toast.LENGTH_SHORT).show()
-                                },
+                                .clickable { galleryLauncher.launch("image/*") },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Outlined.PhotoCamera,
                                 contentDescription = "Cambiar Foto",
                                 tint = Color.White,
-                                modifier = Modifier.size(15.dp)
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
@@ -232,7 +230,6 @@ fun ClientProfileScreen(
                         color = Color(0xFF0F172A)
                     )
 
-                    // Badge Tipo de cliente
                     Surface(
                         color = Color(0xFFE0F2FE),
                         shape = RoundedCornerShape(20.dp)
@@ -246,7 +243,6 @@ fun ClientProfileScreen(
                         )
                     }
 
-                    // Ubicación
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -267,10 +263,8 @@ fun ClientProfileScreen(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                // 3. CAMPOS DE EDICIÓN Y CONTACTO
+                // CAMPOS DE EDICIÓN
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-
-                    // Nombre Completo
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             text = "NOMBRE COMPLETO",
@@ -303,7 +297,6 @@ fun ClientProfileScreen(
                         )
                     }
 
-                    // Teléfono
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             text = "TELÉFONO MÓVIL",
@@ -336,7 +329,6 @@ fun ClientProfileScreen(
                         )
                     }
 
-                    // Correo
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             text = "CORREO ELECTRÓNICO",
@@ -389,15 +381,14 @@ fun ClientProfileScreen(
                     }
                 }
 
-                // 4. OPCIONES DE CONFIGURACIÓN
+                // OPCIONES DE CONFIGURACIÓN
                 Surface(
                     color = Color.White,
                     shape = RoundedCornerShape(16.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column {
-                        // Seguridad y Notificaciones
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -428,7 +419,6 @@ fun ClientProfileScreen(
 
                         HorizontalDivider(color = Color(0xFFF1F5F9))
 
-                        // Mis Calificaciones y Reseñas
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -459,11 +449,11 @@ fun ClientProfileScreen(
                     }
                 }
 
-                // 5. OPCIÓN DE CERRAR SESIÓN
+                // CERRAR SESIÓN
                 Surface(
                     color = Color.White,
                     shape = RoundedCornerShape(16.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFEE2E8)),
+                    border = BorderStroke(1.dp, Color(0xFFFEE2E8)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -491,5 +481,50 @@ fun ClientProfileScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun UserAvatar(
+    fotoUrl: String,
+    nombre: String,
+    modifier: Modifier = Modifier,
+    size: Dp = 90.dp,
+    fontSize: TextUnit = 28.sp
+) {
+    if (fotoUrl.isNotBlank()) {
+        AsyncImage(
+            model = fotoUrl,
+            contentDescription = "Foto de perfil",
+            contentScale = ContentScale.Crop,
+            modifier = modifier
+                .size(size)
+                .clip(CircleShape)
+        )
+    } else {
+        val iniciales = remember(nombre) { obtenerIniciales(nombre) }
+        Box(
+            modifier = modifier
+                .size(size)
+                .clip(CircleShape)
+                .background(Color(0xFF2563EB)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = iniciales,
+                color = Color.White,
+                fontSize = fontSize,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+private fun obtenerIniciales(nombre: String): String {
+    val palabras = nombre.trim().split("\\s+".toRegex()).filter { it.isNotEmpty() }
+    return when {
+        palabras.isEmpty() -> "U"
+        palabras.size == 1 -> palabras[0].take(2).uppercase()
+        else -> "${palabras[0].first()}${palabras[1].first()}".uppercase()
     }
 }

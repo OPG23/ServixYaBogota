@@ -1,19 +1,19 @@
 package com.servixyabogota.ui.client
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -21,13 +21,52 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.firebase.firestore.FirebaseFirestore
+import coil.compose.AsyncImage
+
+data class PropuestaRecibidaUI(
+    val prestadorId: String = "",
+    val prestadorNombre: String = "",
+    val prestadorFotoUrl: String = "",
+    val calificacion: Double = 5.0,
+    val totalResenas: Int = 0,
+    val monto: Double = 0.0,
+    val mensaje: String = ""
+)
 
 @Composable
 fun ClientReceivedProposalsScreen(
-    solicitudId: String = "1024",
+    solicitudId: String,
     onBack: () -> Unit = {},
-    onOpenChat: (String) -> Unit = {}
+    onOpenChat: (solicitudId: String, prestadorId: String, nombrePrestador: String) -> Unit = { _, _, _ -> }
 ) {
+    var listaPropuestas by remember { mutableStateOf<List<PropuestaRecibidaUI>>(emptyList()) }
+    var cargando by remember { mutableStateOf(true) }
+
+    LaunchedEffect(solicitudId) {
+        val db = FirebaseFirestore.getInstance()
+        db.collection("solicitudes")
+            .document(solicitudId)
+            .collection("propuestas")
+            .addSnapshotListener { snapshot, error ->
+                if (error == null && snapshot != null) {
+                    val propuestas = snapshot.documents.mapNotNull { doc ->
+                        PropuestaRecibidaUI(
+                            prestadorId = doc.getString("prestadorId") ?: doc.id,
+                            prestadorNombre = doc.getString("prestadorNombre") ?: "Prestador",
+                            prestadorFotoUrl = doc.getString("prestadorFotoUrl") ?: "",
+                            calificacion = doc.getDouble("calificacion") ?: 5.0,
+                            totalResenas = doc.getLong("totalResenas")?.toInt() ?: 0,
+                            monto = doc.getDouble("monto") ?: 0.0,
+                            mensaje = doc.getString("mensaje") ?: ""
+                        )
+                    }
+                    listaPropuestas = propuestas
+                }
+                cargando = false
+            }
+    }
+
     Scaffold(
         containerColor = Color(0xFFF8FAFC)
     ) { innerPadding ->
@@ -35,9 +74,8 @@ fun ClientReceivedProposalsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
         ) {
-            // 1. ENCABEZADO AZUL SUPERIOR
+            // Header Superior
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -69,7 +107,7 @@ fun ClientReceivedProposalsScreen(
                     )
 
                     Text(
-                        text = "Solicitud #$solicitudId",
+                        text = "${listaPropuestas.size} postulados",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
                         color = Color.White.copy(alpha = 0.9f)
@@ -77,386 +115,157 @@ fun ClientReceivedProposalsScreen(
                 }
             }
 
-            // CONTENIDO
-            Column(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // 2. RESUMEN DE LA SOLICITUD
-                Surface(
-                    color = Color(0xFFE0F2FE),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth()
+            if (cargando) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Color(0xFF2563EB))
+                }
+            } else if (listaPropuestas.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "Aún no hay prestadores postulados a esta solicitud.",
+                        fontSize = 14.sp,
+                        color = Color(0xFF64748B)
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    items(listaPropuestas, key = { it.prestadorId }) { propuesta ->
+                        TarjetaPropuestaItem(
+                            propuesta = propuesta,
+                            onOpenChat = {
+                                onOpenChat(solicitudId, propuesta.prestadorId, propuesta.prestadorNombre)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TarjetaPropuestaItem(
+    propuesta: PropuestaRecibidaUI,
+    onOpenChat: () -> Unit
+) {
+    Surface(
+        color = Color.White,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(contentAlignment = Alignment.BottomEnd) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFE2E8F0)),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        if (propuesta.prestadorFotoUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = propuesta.prestadorFotoUrl,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
                             Text(
-                                text = "🚰 Fuga en lavamanos principal",
+                                text = propuesta.prestadorNombre.take(2).uppercase(),
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A)
+                                color = Color(0xFF475569)
                             )
-
-                            Surface(
-                                color = Color(0xFFFEE2E2),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Text(
-                                    text = "🚨 Urgente",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFDC2626),
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                )
-                            }
                         }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF16A34A)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Check,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(11.dp)
+                        )
+                    }
+                }
 
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = propuesta.prestadorNombre,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0F172A)
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Star,
+                            contentDescription = null,
+                            tint = Color(0xFFF59E0B),
+                            modifier = Modifier.size(16.dp)
+                        )
                         Text(
-                            text = "Usaquén, Bogotá • 3 Prestadores interesados",
+                            text = "${propuesta.calificacion}",
                             fontSize = 13.sp,
-                            color = Color(0xFF475569)
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFF59E0B)
+                        )
+                        Text(
+                            text = "(${propuesta.totalResenas})",
+                            fontSize = 13.sp,
+                            color = Color(0xFF64748B)
                         )
                     }
                 }
 
-                // 3. TARJETA 1: CARLOS PÉREZ (CON BORDE DESTACADO Y NOTIFICACIÓN)
-                Surface(
-                    color = Color.White,
-                    shape = RoundedCornerShape(16.dp),
-                    border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF2563EB)),
-                    modifier = Modifier.fillMaxWidth()
+                Text(
+                    text = "$${propuesta.monto.toInt()} COP",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF16A34A)
+                )
+            }
+
+            if (propuesta.mensaje.isNotBlank()) {
+                Text(
+                    text = "\"${propuesta.mensaje}\"",
+                    fontSize = 14.sp,
+                    color = Color(0xFF475569)
+                )
+            }
+
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                Button(
+                    onClick = onOpenChat,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                    shape = RoundedCornerShape(10.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            // Avatar con Badge Verificado
-                            Box(contentAlignment = Alignment.BottomEnd) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFFE2E8F0)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "CP",
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF475569)
-                                    )
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .size(16.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF16A34A)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Check,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(11.dp)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.width(12.dp))
-
-                            Column {
-                                Text(
-                                    text = "Carlos Pérez",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF0F172A)
-                                )
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Star,
-                                        contentDescription = null,
-                                        tint = Color(0xFFF59E0B),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = "4.8",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFFF59E0B)
-                                    )
-                                    Text(
-                                        text = "(15)",
-                                        fontSize = 13.sp,
-                                        color = Color(0xFF64748B)
-                                    )
-                                }
-                            }
-                        }
-
-                        Text(
-                            text = "\"Hola Laura, vi tu solicitud. Puedo pasar hoy...\"",
-                            fontSize = 14.sp,
-                            color = Color(0xFF475569)
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Surface(
-                                color = Color(0xFF2563EB),
-                                shape = RoundedCornerShape(16.dp)
-                            ) {
-                                Text(
-                                    text = "1 mensaje nuevo",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color.White,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                )
-                            }
-
-                            Button(
-                                onClick = { onOpenChat("Carlos Pérez") },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Text(
-                                    text = "Responder Chat",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // 4. TARJETA 2: JORGE RAMÍREZ
-                Surface(
-                    color = Color.White,
-                    shape = RoundedCornerShape(16.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(contentAlignment = Alignment.BottomEnd) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(48.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFFE2E8F0)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "JR",
-                                            fontSize = 16.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF475569)
-                                        )
-                                    }
-                                    Box(
-                                        modifier = Modifier
-                                            .size(16.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFF16A34A)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Check,
-                                            contentDescription = null,
-                                            tint = Color.White,
-                                            modifier = Modifier.size(11.dp)
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.width(12.dp))
-
-                                Column {
-                                    Text(
-                                        text = "Jorge Ramírez",
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF0F172A)
-                                    )
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Star,
-                                            contentDescription = null,
-                                            tint = Color(0xFFF59E0B),
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Text(
-                                            text = "4.6",
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFFF59E0B)
-                                        )
-                                        Text(
-                                            text = "(8)",
-                                            fontSize = 13.sp,
-                                            color = Color(0xFF64748B)
-                                        )
-                                    }
-                                }
-                            }
-
-                            Text(
-                                text = "Hace 25 min",
-                                fontSize = 12.sp,
-                                color = Color(0xFF94A3B8)
-                            )
-                        }
-
-                        Text(
-                            text = "\"Buenas tardes, ¿el problema es en la manguera...\"",
-                            fontSize = 14.sp,
-                            color = Color(0xFF475569)
-                        )
-
-                        Box(
-                            modifier = Modifier.fillMaxWidth(),
-                            contentAlignment = Alignment.CenterEnd
-                        ) {
-                            Button(
-                                onClick = { onOpenChat("Jorge Ramírez") },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Text(
-                                    text = "Abrir Chat",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // 5. TARJETA 3: ANDRÉS TORRES
-                Surface(
-                    color = Color.White,
-                    shape = RoundedCornerShape(16.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(contentAlignment = Alignment.BottomEnd) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFFE2E8F0)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "AT",
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF475569)
-                                    )
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .size(16.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF16A34A)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Check,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(11.dp)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.width(12.dp))
-
-                            Column {
-                                Text(
-                                    text = "Andrés Torres",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF0F172A)
-                                )
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.Star,
-                                        contentDescription = null,
-                                        tint = Color(0xFFF59E0B),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = "4.9",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFFF59E0B)
-                                    )
-                                    Text(
-                                        text = "(22)",
-                                        fontSize = 13.sp,
-                                        color = Color(0xFF64748B)
-                                    )
-                                }
-                            }
-                        }
-
-                        Text(
-                            text = "\"Hola, dispongo de disponibilidad inmediata para...\"",
-                            fontSize = 14.sp,
-                            color = Color(0xFF475569)
-                        )
-
-                        Box(
-                            modifier = Modifier.fillMaxWidth(),
-                            contentAlignment = Alignment.CenterEnd
-                        ) {
-                            Button(
-                                onClick = { onOpenChat("Andrés Torres") },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Text(
-                                    text = "Abrir Chat",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
+                    Text(
+                        text = "Abrir Chat",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
