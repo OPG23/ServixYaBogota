@@ -18,15 +18,28 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.Filter
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Locale
 
+// Modelo exclusivo para la UI de esta pantalla
+data class ReviewDisplayItem(
+    val id: String = "",
+    val nombre: String = "",
+    val fotoUrl: String = "",
+    val fecha: String = "",
+    val calificacion: Int = 5,
+    val comentario: String = ""
+)
 
 @Composable
 fun ClientReviewsScreen(
@@ -37,13 +50,14 @@ fun ClientReviewsScreen(
     val db = remember { FirebaseFirestore.getInstance() }
     val auth = remember { FirebaseAuth.getInstance() }
     val currentUserId = auth.currentUser?.uid ?: ""
+    val scope = rememberCoroutineScope()
 
     var isLoading by remember { mutableStateOf(true) }
     var promedioCliente by remember { mutableStateOf(0.0) }
     var totalEvaluacionesCliente by remember { mutableStateOf(0) }
 
-    var otorgadasReviews by remember { mutableStateOf<List<ReviewItem>>(emptyList()) }
-    var recibidasReviews by remember { mutableStateOf<List<ReviewItem>>(emptyList()) }
+    var otorgadasReviews by remember { mutableStateOf<List<ReviewDisplayItem>>(emptyList()) }
+    var recibidasReviews by remember { mutableStateOf<List<ReviewDisplayItem>>(emptyList()) }
 
     LaunchedEffect(currentUserId) {
         if (currentUserId.isBlank()) {
@@ -53,7 +67,7 @@ fun ClientReviewsScreen(
 
         val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
-        // 1. Escuchar promedio de reputación del cliente
+        // 1. Datos de reputación del cliente
         db.collection("usuarios").document(currentUserId)
             .addSnapshotListener { snapshot, _ ->
                 if (snapshot != null && snapshot.exists()) {
@@ -67,7 +81,7 @@ fun ClientReviewsScreen(
                 }
             }
 
-        // 2. Escuchar TODAS las reseñas asociadas al usuario (como autor, cliente o destinatario)
+        // 2. Escuchar reseñas de Firestore
         val queryResenas = db.collection("resenas")
             .where(
                 Filter.or(
@@ -79,64 +93,98 @@ fun ClientReviewsScreen(
 
         queryResenas.addSnapshotListener { snapshot, error ->
             if (error == null && snapshot != null) {
-                val listaOtorgadas = mutableListOf<ReviewItem>()
-                val listaRecibidas = mutableListOf<ReviewItem>()
+                scope.launch {
+                    val listaOtorgadas = mutableListOf<ReviewDisplayItem>()
+                    val listaRecibidas = mutableListOf<ReviewDisplayItem>()
 
-                snapshot.documents.forEach { doc ->
-                    val autorId = doc.getString("autorId") ?: ""
-                    val clienteId = doc.getString("clienteId") ?: ""
-                    val destinatarioId = doc.getString("destinatarioId") ?: ""
-                    val tipo = doc.getString("tipo") ?: ""
+                    for (doc in snapshot.documents) {
+                        val autorId = doc.getString("autorId") ?: ""
+                        val clienteId = doc.getString("clienteId") ?: ""
+                        val destinatarioId = doc.getString("destinatarioId") ?: ""
+                        val prestadorIdDoc = doc.getString("prestadorId") ?: ""
+                        val tipo = doc.getString("tipo") ?: ""
 
-                    val calificacion = doc.getLong("calificacion")?.toInt() ?: 5
-                    val comentario = doc.getString("comentario") ?: ""
-                    val timestamp = doc.getTimestamp("fecha")
-                    val fechaStr = timestamp?.toDate()?.let { sdf.format(it) } ?: "Reciente"
+                        val calificacion = doc.getLong("calificacion")?.toInt() ?: 5
+                        val comentario = doc.getString("comentario") ?: ""
+                        val timestamp = doc.getTimestamp("fecha")
+                        val fechaStr = timestamp?.toDate()?.let { sdf.format(it) } ?: "Reciente"
 
-                    // Discriminación de reseña RECIBIDA vs OTORGADA
-                    val esRecibida = tipo == "PRESTADOR_A_CLIENTE" ||
-                            (destinatarioId == currentUserId && tipo != "CLIENTE_A_PRESTADOR") ||
-                            (clienteId == currentUserId && autorId.isNotBlank() && autorId != currentUserId && tipo != "CLIENTE_A_PRESTADOR")
+                        val esRecibida = tipo == "PRESTADOR_A_CLIENTE" ||
+                                (destinatarioId == currentUserId && tipo != "CLIENTE_A_PRESTADOR") ||
+                                (clienteId == currentUserId && autorId.isNotBlank() && autorId != currentUserId && tipo != "CLIENTE_A_PRESTADOR")
 
-                    if (esRecibida) {
-                        val nombre = doc.getString("autorNombre")
-                            ?: doc.getString("prestadorNombre")
-                            ?: doc.getString("nombrePrestador")
-                            ?: "Prestador ServixYa"
+                        // Determinar el ID del prestador involucrado
+                        val idPrestador = if (esRecibida) {
+                            autorId.ifBlank { prestadorIdDoc }
+                        } else {
+                            destinatarioId.ifBlank { prestadorIdDoc }
+                        }
 
-                        listaRecibidas.add(
-                            ReviewItem(
-                                id = doc.id,
-                                nombre = nombre,
-                                fecha = fechaStr,
-                                calificacion = calificacion,
-                                comentario = comentario
-                            )
+                        // Buscar datos actualizados del prestador en la colección /usuarios
+                        var nombreCompleto = ""
+                        var fotoUrl = ""
+
+                        if (idPrestador.isNotBlank() && idPrestador != currentUserId) {
+                            try {
+                                val userDoc = db.collection("usuarios").document(idPrestador).get().await()
+                                if (userDoc.exists()) {
+                                    val nom = userDoc.getString("nombre") ?: ""
+                                    val ape = userDoc.getString("apellido") ?: userDoc.getString("apellidos") ?: ""
+                                    nombreCompleto = "$nom $ape".trim()
+
+                                    fotoUrl = userDoc.getString("fotoUrl")
+                                        ?: userDoc.getString("fotoPerfilUrl")
+                                                ?: userDoc.getString("foto")
+                                                ?: ""
+                                }
+                            } catch (_: Exception) { }
+                        }
+
+                        // Fallback a los datos guardados directamente en el documento de reseña
+                        if (nombreCompleto.isBlank()) {
+                            nombreCompleto = if (esRecibida) {
+                                doc.getString("autorNombre")
+                                    ?: doc.getString("prestadorNombre")
+                                    ?: doc.getString("nombrePrestador")
+                                    ?: "Prestador ServixYa"
+                            } else {
+                                doc.getString("destinatarioNombre")
+                                    ?: doc.getString("prestadorNombre")
+                                    ?: doc.getString("nombrePrestador")
+                                    ?: "Prestador ServixYa"
+                            }
+                        }
+
+                        if (fotoUrl.isBlank()) {
+                            fotoUrl = doc.getString("fotoUrl")
+                                ?: doc.getString("destinatarioFotoUrl")
+                                        ?: doc.getString("autorFotoUrl")
+                                        ?: ""
+                        }
+
+                        val item = ReviewDisplayItem(
+                            id = doc.id,
+                            nombre = nombreCompleto,
+                            fotoUrl = fotoUrl,
+                            fecha = fechaStr,
+                            calificacion = calificacion,
+                            comentario = comentario
                         )
-                    } else {
-                        // Reseña OTORGADA por el cliente al prestador
-                        val nombre = doc.getString("destinatarioNombre")
-                            ?: doc.getString("prestadorNombre")
-                            ?: doc.getString("nombrePrestador")
-                            ?: doc.getString("nombre")
-                            ?: "Prestador ServixYa"
 
-                        listaOtorgadas.add(
-                            ReviewItem(
-                                id = doc.id,
-                                nombre = nombre,
-                                fecha = fechaStr,
-                                calificacion = calificacion,
-                                comentario = comentario
-                            )
-                        )
+                        if (esRecibida) {
+                            listaRecibidas.add(item)
+                        } else {
+                            listaOtorgadas.add(item)
+                        }
                     }
-                }
 
-                otorgadasReviews = listaOtorgadas
-                recibidasReviews = listaRecibidas
+                    otorgadasReviews = listaOtorgadas
+                    recibidasReviews = listaRecibidas
+                    isLoading = false
+                }
+            } else {
+                isLoading = false
             }
-            isLoading = false
         }
     }
 
@@ -317,7 +365,7 @@ fun ClientReviewsScreen(
 }
 
 @Composable
-fun ReviewCard(review: ReviewItem) {
+fun ReviewCard(review: ReviewDisplayItem) {
     Surface(
         color = Color.White,
         shape = RoundedCornerShape(16.dp),
@@ -328,24 +376,36 @@ fun ReviewCard(review: ReviewItem) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Header del Card: Avatar, Nombre y Fecha
+            // Header del Card: Foto/Avatar, Nombre y Fecha
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFCBD5E1)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Person,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
+                if (review.fotoUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = review.fotoUrl,
+                        contentDescription = review.nombre,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFE2E8F0))
                     )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFCBD5E1)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Person,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
