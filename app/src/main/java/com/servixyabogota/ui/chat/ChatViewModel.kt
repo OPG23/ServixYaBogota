@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.Date
+import kotlinx.coroutines.tasks.await
 
 data class MensajeChat(
     val id: String = "",
@@ -62,6 +63,7 @@ class ChatViewModel : ViewModel() {
 
     private var documentoListener: ListenerRegistration? = null
     private var mensajesListener: ListenerRegistration? = null
+    private var resenasListener: ListenerRegistration? = null
 
     private var chatIdActual: String = ""
     private var currentUserIdActual: String = ""
@@ -91,6 +93,7 @@ class ChatViewModel : ViewModel() {
         }
 
         escucharMensajesEnVivo(chatId)
+        escucharEstadoCalificacion(chatId, currentUserId)
     }
 
     private fun escucharSolicitudChat(solicitudId: String, currentUserId: String, esCliente: Boolean) {
@@ -106,7 +109,7 @@ class ChatViewModel : ViewModel() {
                     val estadoPropuesta = snapshot.getString("estadoPropuesta") ?: snapshot.getString("estadoOferta") ?: "SIN_PROPUESTA"
                     val estadoSolicitud = snapshot.getString("estado") ?: ""
                     val clienteCalifico = snapshot.getBoolean("clienteCalifico") ?: false
-                    val prestadorCalifico = snapshot.getBoolean("prestadorCalifico") ?: false
+                    val prestadorCalifico = snapshot.getBoolean("prestadorCalifico") ?: _uiState.value.prestadorCalifico
 
                     val clienteId = snapshot.getString("clienteId") ?: ""
                     val prestadorId = snapshot.getString("prestadorId")
@@ -153,7 +156,7 @@ class ChatViewModel : ViewModel() {
                     val estadoPropuesta = snapshot.getString("estadoPropuesta") ?: snapshot.getString("estadoOferta") ?: "SIN_PROPUESTA"
                     val estadoSolicitud = snapshot.getString("estado") ?: ""
                     val clienteCalifico = snapshot.getBoolean("clienteCalifico") ?: false
-                    val prestadorCalifico = snapshot.getBoolean("prestadorCalifico") ?: false
+                    val prestadorCalifico = snapshot.getBoolean("prestadorCalifico") ?: _uiState.value.prestadorCalifico
 
                     val idContraparte = if (esCliente) prestadorId else clienteId
                     val rolContraparte = if (esCliente) "Prestador" else "Cliente"
@@ -174,6 +177,29 @@ class ChatViewModel : ViewModel() {
                     }
                 } else {
                     _uiState.value = _uiState.value.copy(isLoading = false)
+                }
+            }
+    }
+
+    /**
+     * Escucha en tiempo real la colección 'resenas' para validar si el prestador ya calificó este chat/solicitud
+     */
+    private fun escucharEstadoCalificacion(chatId: String, currentUserId: String) {
+        resenasListener?.remove()
+
+        resenasListener = db.collection("resenas")
+            .whereEqualTo("autorId", currentUserId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+
+                val yaExisteResena = snapshot.documents.any { doc ->
+                    val docChatId = doc.getString("chatId") ?: ""
+                    val docSolicitudId = doc.getString("solicitudId") ?: ""
+                    docChatId == chatId || docSolicitudId == chatId
+                }
+
+                if (yaExisteResena) {
+                    _uiState.value = _uiState.value.copy(prestadorCalifico = true)
                 }
             }
     }
@@ -391,10 +417,8 @@ class ChatViewModel : ViewModel() {
         val yaCalificadoOCompletado = _uiState.value.clienteCalifico ||
                 _uiState.value.estadoSolicitud in listOf("COMPLETADO", "COMPLETADA", "FINALIZADO")
 
-        // No enviar si hay una oferta actualmente pendiente
         if (_uiState.value.estadoPropuesta == "PENDIENTE") return
 
-        // Si la oferta fue ACEPTADA, solo permitimos una nueva si es chat directo y el servicio ya terminó/calificó
         if (_uiState.value.estadoPropuesta == "ACEPTADA" && !(esChatDirecto && yaCalificadoOCompletado)) return
 
         val coleccionPadre = if (esChatDirecto) "chats" else "solicitudes"
@@ -431,7 +455,6 @@ class ChatViewModel : ViewModel() {
             campoNoLeidosDestinatario to FieldValue.increment(1)
         )
 
-        // Al iniciar un nuevo ciclo de cotización en chat directo, reiniciamos el estado de calificación
         if (esChatDirecto && yaCalificadoOCompletado) {
             datosUltimoMensaje["clienteCalifico"] = false
             datosUltimoMensaje["prestadorCalifico"] = false
@@ -533,6 +556,7 @@ class ChatViewModel : ViewModel() {
 
     /**
      * Permite al prestador calificar al cliente una vez el servicio esté completado.
+     * Guarda en la colección raíz 'resenas' de forma estandarizada y recalcula el promedio del cliente.
      */
     fun calificarCliente(
         calificacion: Int,
@@ -555,38 +579,69 @@ class ChatViewModel : ViewModel() {
 
         db.collection("usuarios").document(currentUserIdActual).get()
             .addOnSuccessListener { docPrestador ->
-                val nombrePrestador = docPrestador.getString("nombreCompleto")
-                    ?: docPrestador.getString("nombre")
-                    ?: "Prestador ServixYa"
+                val nombrePrestadorDoc = docPrestador.getString("nombreCompleto")
+                val primerNombrePrestador = docPrestador.getString("nombre") ?: ""
+                val apellidoPrestador = docPrestador.getString("apellido") ?: ""
 
-                val reseñaMap = hashMapOf(
-                    "autorId" to currentUserIdActual,
-                    "autorNombre" to nombrePrestador,
-                    "clienteId" to clienteId,
-                    "calificacion" to calificacion,
-                    "comentario" to comentario.trim(),
-                    "fecha" to Timestamp.now(),
-                    "solicitudId" to chatIdActual
-                )
+                val nombrePrestador = when {
+                    !nombrePrestadorDoc.isNullOrBlank() -> nombrePrestadorDoc
+                    primerNombrePrestador.isNotBlank() -> "$primerNombrePrestador $apellidoPrestador".trim()
+                    else -> "Prestador ServixYa"
+                }
 
-                val batch = db.batch()
-                val refReseña = db.collection("usuarios")
-                    .document(clienteId)
-                    .collection("calificacionesRecibidas")
-                    .document()
+                db.collection("usuarios").document(clienteId).get()
+                    .addOnSuccessListener { docCliente ->
+                        val nombreClienteDoc = docCliente.getString("nombreCompleto")
+                        val primerNombreCliente = docCliente.getString("nombre") ?: ""
+                        val apellidoCliente = docCliente.getString("apellido") ?: ""
 
-                batch.set(refReseña, reseñaMap)
-                batch.set(refPadre, mapOf("prestadorCalifico" to true), SetOptions.merge())
+                        val nombreCliente = when {
+                            !nombreClienteDoc.isNullOrBlank() -> nombreClienteDoc
+                            primerNombreCliente.isNotBlank() -> "$primerNombreCliente $apellidoCliente".trim()
+                            else -> "Cliente ServixYa"
+                        }
 
-                batch.commit()
-                    .addOnSuccessListener {
-                        _uiState.value = _uiState.value.copy(isLoading = false, prestadorCalifico = true)
-                        enviarMensaje("⭐ El prestador ha dejado una calificación de $calificacion ★ para el cliente.")
-                        onSuccess()
+                        viewModelScope.launch {
+                            try {
+                                val batch = db.batch()
+
+                                val refResena = db.collection("resenas").document()
+                                val nuevaResena = hashMapOf(
+                                    "chatId" to chatIdActual,
+                                    "solicitudId" to if (esChatDirecto) "" else chatIdActual,
+                                    "autorId" to currentUserIdActual,
+                                    "autorNombre" to nombrePrestador,
+                                    "prestadorId" to currentUserIdActual,
+                                    "prestadorNombre" to nombrePrestador,
+                                    "destinatarioId" to clienteId,
+                                    "destinatarioNombre" to nombreCliente,
+                                    "clienteId" to clienteId,
+                                    "clienteNombre" to nombreCliente,
+                                    "tipo" to "PRESTADOR_A_CLIENTE",
+                                    "calificacion" to calificacion,
+                                    "comentario" to comentario.trim(),
+                                    "fecha" to Timestamp.now()
+                                )
+                                batch.set(refResena, nuevaResena)
+
+                                batch.set(refPadre, mapOf("prestadorCalifico" to true), SetOptions.merge())
+
+                                batch.commit().await()
+
+                                recalcularPromedioCliente(clienteId)
+
+                                _uiState.value = _uiState.value.copy(isLoading = false, prestadorCalifico = true)
+                                enviarMensaje("⭐ El prestador ha dejado una calificación de $calificacion ★ para el cliente.")
+                                onSuccess()
+                            } catch (e: Exception) {
+                                _uiState.value = _uiState.value.copy(isLoading = false)
+                                onError(e.message ?: "Error al guardar la calificación")
+                            }
+                        }
                     }
-                    .addOnFailureListener { error ->
+                    .addOnFailureListener {
                         _uiState.value = _uiState.value.copy(isLoading = false)
-                        onError(error.message ?: "Error al guardar la calificación")
+                        onError("Error al obtener datos del cliente")
                     }
             }
             .addOnFailureListener {
@@ -595,11 +650,41 @@ class ChatViewModel : ViewModel() {
             }
     }
 
+    private suspend fun recalcularPromedioCliente(clienteId: String) {
+        try {
+            val resenasQuery = db.collection("resenas")
+                .whereEqualTo("destinatarioId", clienteId)
+                .whereEqualTo("tipo", "PRESTADOR_A_CLIENTE")
+                .get()
+                .await()
+
+            val docs = resenasQuery.documents
+            val totalResenas = docs.size
+            if (totalResenas > 0) {
+                val suma = docs.sumOf { (it.get("calificacion") as? Number)?.toDouble() ?: 5.0 }
+                val promedio = suma / totalResenas
+
+                db.collection("usuarios").document(clienteId)
+                    .update(
+                        mapOf(
+                            "calificacion" to promedio,
+                            "promedioCalificacion" to promedio,
+                            "totalResenas" to totalResenas
+                        )
+                    ).await()
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ChatViewModel", "Error al recalcular promedio cliente: ${e.message}")
+        }
+    }
+
     private fun detenerListeners() {
         documentoListener?.remove()
         mensajesListener?.remove()
+        resenasListener?.remove()
         documentoListener = null
         mensajesListener = null
+        resenasListener = null
     }
 
     override fun onCleared() {

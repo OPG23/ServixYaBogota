@@ -22,14 +22,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-data class ReviewItem(
-    val id: String,
-    val nombre: String,
-    val fecha: String,
-    val calificacion: Int,
-    val comentario: String
-)
-
 @Composable
 fun ClientReviewsScreen(
     onBack: () -> Unit = {}

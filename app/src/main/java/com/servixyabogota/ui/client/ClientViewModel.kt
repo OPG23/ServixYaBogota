@@ -19,6 +19,19 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+// Modelo UI para las reseñas del cliente
+data class ReviewItem(
+    val id: String = "",
+    val nombre: String = "Prestador",
+    val fecha: String = "",
+    val calificacion: Int = 5,
+    val comentario: String = "",
+    val fechaObj: Date? = null
+)
 
 class ClientViewModel : ViewModel() {
 
@@ -43,9 +56,267 @@ class ClientViewModel : ViewModel() {
     var listaPrestadores by mutableStateOf<List<ClientProviderModel>>(emptyList())
     var estaCargandoPrestadores by mutableStateOf(false)
 
+    // ESTADOS PARA RESEÑAS REALES DE FIRESTORE
+    var listaResenasOtorgadas by mutableStateOf<List<ReviewItem>>(emptyList())
+        private set
+    var listaResenasRecibidas by mutableStateOf<List<ReviewItem>>(emptyList())
+        private set
+    var promedioCalificacion by mutableStateOf(5.0)
+        private set
+    var totalResenasCount by mutableStateOf(0)
+        private set
+    var estaCargandoResenas by mutableStateOf(false)
+        private set
+
     init {
         cargarPerfilCliente()
         cargarPrestadores()
+        escucharResenas()
+    }
+
+    /**
+     * Escucha en tiempo real la reputación y las reseñas otorgadas/recibidas por el cliente
+     */
+    fun escucharResenas() {
+        val uid = auth.currentUser?.uid ?: return
+        estaCargandoResenas = true
+
+        // 1. Escuchar promedio de estrellas y total de reseñas desde el perfil del usuario
+        db.collection("usuarios").document(uid)
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null && snapshot.exists()) {
+                    promedioCalificacion = snapshot.getDouble("calificacion")
+                        ?: snapshot.getDouble("promedioCalificacion")
+                                ?: 5.0
+                    totalResenasCount = snapshot.getLong("totalResenas")?.toInt() ?: 0
+                }
+            }
+
+        // 2. Escuchar reseñas OTORGADAS por el cliente a prestadores (Cliente -> Prestador)
+        db.collection("resenas")
+            .whereEqualTo("autorId", uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    estaCargandoResenas = false
+                    return@addSnapshotListener
+                }
+
+                if (snapshot == null || snapshot.documents.isEmpty()) {
+                    listaResenasOtorgadas = emptyList()
+                    estaCargandoResenas = false
+                    return@addSnapshotListener
+                }
+
+                val docsFiltered = snapshot.documents.filter { doc ->
+                    doc.getString("tipo") != "PRESTADOR_A_CLIENTE"
+                }
+
+                if (docsFiltered.isEmpty()) {
+                    listaResenasOtorgadas = emptyList()
+                    estaCargandoResenas = false
+                    return@addSnapshotListener
+                }
+
+                val otorgadasTemp = mutableListOf<ReviewItem>()
+                var procesados = 0
+
+                for (doc in docsFiltered) {
+                    val reviewId = doc.id
+                    val prestadorId = doc.getString("prestadorId") ?: doc.getString("destinatarioId") ?: ""
+                    val calificacion = doc.getLong("calificacion")?.toInt() ?: 5
+                    val comentario = doc.getString("comentario") ?: ""
+                    val timestamp = doc.getTimestamp("fecha")
+                    val fechaObj = timestamp?.toDate()
+
+                    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                    val fechaFormateada = if (fechaObj != null) sdf.format(fechaObj) else "Reciente"
+                    val prestadorNombreDirecto = doc.getString("prestadorNombre") ?: doc.getString("destinatarioNombre")
+
+                    if (!prestadorNombreDirecto.isNullOrBlank()) {
+                        otorgadasTemp.add(
+                            ReviewItem(
+                                id = reviewId,
+                                nombre = prestadorNombreDirecto,
+                                fecha = fechaFormateada,
+                                calificacion = calificacion,
+                                comentario = comentario,
+                                fechaObj = fechaObj
+                            )
+                        )
+                        procesados++
+                        if (procesados == docsFiltered.size) {
+                            listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
+                            estaCargandoResenas = false
+                        }
+                    } else if (prestadorId.isNotBlank()) {
+                        db.collection("usuarios").document(prestadorId).get()
+                            .addOnSuccessListener { providerDoc ->
+                                val nombreDoc = providerDoc.getString("nombreCompleto")
+                                val primerNombre = providerDoc.getString("nombre") ?: ""
+                                val apellido = providerDoc.getString("apellido") ?: ""
+
+                                val nombreFinal = when {
+                                    !nombreDoc.isNullOrBlank() -> nombreDoc
+                                    primerNombre.isNotBlank() -> "$primerNombre $apellido".trim()
+                                    else -> "Prestador ServixYa"
+                                }
+
+                                otorgadasTemp.add(
+                                    ReviewItem(
+                                        id = reviewId,
+                                        nombre = nombreFinal,
+                                        fecha = fechaFormateada,
+                                        calificacion = calificacion,
+                                        comentario = comentario,
+                                        fechaObj = fechaObj
+                                    )
+                                )
+                                procesados++
+                                if (procesados == docsFiltered.size) {
+                                    listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
+                                    estaCargandoResenas = false
+                                }
+                            }
+                            .addOnFailureListener {
+                                otorgadasTemp.add(
+                                    ReviewItem(
+                                        id = reviewId,
+                                        nombre = "Prestador ServixYa",
+                                        fecha = fechaFormateada,
+                                        calificacion = calificacion,
+                                        comentario = comentario,
+                                        fechaObj = fechaObj
+                                    )
+                                )
+                                procesados++
+                                if (procesados == docsFiltered.size) {
+                                    listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
+                                    estaCargandoResenas = false
+                                }
+                            }
+                    } else {
+                        otorgadasTemp.add(
+                            ReviewItem(
+                                id = reviewId,
+                                nombre = "Prestador ServixYa",
+                                fecha = fechaFormateada,
+                                calificacion = calificacion,
+                                comentario = comentario,
+                                fechaObj = fechaObj
+                            )
+                        )
+                        procesados++
+                        if (procesados == docsFiltered.size) {
+                            listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
+                            estaCargandoResenas = false
+                        }
+                    }
+                }
+            }
+
+        // 3. Escuchar reseñas RECIBIDAS por el cliente (Prestador -> Cliente)
+        db.collection("resenas")
+            .whereEqualTo("destinatarioId", uid)
+            .whereEqualTo("tipo", "PRESTADOR_A_CLIENTE")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null || snapshot.documents.isEmpty()) {
+                    listaResenasRecibidas = emptyList()
+                    return@addSnapshotListener
+                }
+
+                val docs = snapshot.documents
+                val recibidasTemp = mutableListOf<ReviewItem>()
+                var procesados = 0
+
+                for (doc in docs) {
+                    val reviewId = doc.id
+                    val prestadorId = doc.getString("autorId") ?: doc.getString("prestadorId") ?: ""
+                    val calificacion = doc.getLong("calificacion")?.toInt() ?: 5
+                    val comentario = doc.getString("comentario") ?: ""
+                    val timestamp = doc.getTimestamp("fecha")
+                    val fechaObj = timestamp?.toDate()
+
+                    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                    val fechaFormateada = if (fechaObj != null) sdf.format(fechaObj) else "Reciente"
+                    val prestadorNombreDirecto = doc.getString("autorNombre") ?: doc.getString("prestadorNombre")
+
+                    if (!prestadorNombreDirecto.isNullOrBlank()) {
+                        recibidasTemp.add(
+                            ReviewItem(
+                                id = reviewId,
+                                nombre = prestadorNombreDirecto,
+                                fecha = fechaFormateada,
+                                calificacion = calificacion,
+                                comentario = comentario,
+                                fechaObj = fechaObj
+                            )
+                        )
+                        procesados++
+                        if (procesados == docs.size) {
+                            listaResenasRecibidas = recibidasTemp.sortedByDescending { it.fechaObj }
+                        }
+                    } else if (prestadorId.isNotBlank()) {
+                        db.collection("usuarios").document(prestadorId).get()
+                            .addOnSuccessListener { providerDoc ->
+                                val nombreDoc = providerDoc.getString("nombreCompleto")
+                                val primerNombre = providerDoc.getString("nombre") ?: ""
+                                val apellido = providerDoc.getString("apellido") ?: ""
+
+                                val nombreFinal = when {
+                                    !nombreDoc.isNullOrBlank() -> nombreDoc
+                                    primerNombre.isNotBlank() -> "$primerNombre $apellido".trim()
+                                    else -> "Prestador ServixYa"
+                                }
+
+                                recibidasTemp.add(
+                                    ReviewItem(
+                                        id = reviewId,
+                                        nombre = nombreFinal,
+                                        fecha = fechaFormateada,
+                                        calificacion = calificacion,
+                                        comentario = comentario,
+                                        fechaObj = fechaObj
+                                    )
+                                )
+                                procesados++
+                                if (procesados == docs.size) {
+                                    listaResenasRecibidas = recibidasTemp.sortedByDescending { it.fechaObj }
+                                }
+                            }
+                            .addOnFailureListener {
+                                recibidasTemp.add(
+                                    ReviewItem(
+                                        id = reviewId,
+                                        nombre = "Prestador ServixYa",
+                                        fecha = fechaFormateada,
+                                        calificacion = calificacion,
+                                        comentario = comentario,
+                                        fechaObj = fechaObj
+                                    )
+                                )
+                                procesados++
+                                if (procesados == docs.size) {
+                                    listaResenasRecibidas = recibidasTemp.sortedByDescending { it.fechaObj }
+                                }
+                            }
+                    } else {
+                        recibidasTemp.add(
+                            ReviewItem(
+                                id = reviewId,
+                                nombre = "Prestador ServixYa",
+                                fecha = fechaFormateada,
+                                calificacion = calificacion,
+                                comentario = comentario,
+                                fechaObj = fechaObj
+                            )
+                        )
+                        procesados++
+                        if (procesados == docs.size) {
+                            listaResenasRecibidas = recibidasTemp.sortedByDescending { it.fechaObj }
+                        }
+                    }
+                }
+            }
     }
 
     /**
@@ -287,7 +558,6 @@ class ClientViewModel : ViewModel() {
                 }
         }
 
-        // Si el usuario seleccionó una imagen local nueva
         if (nuevaFotoUri != null) {
             val storageRef = storage.reference.child("profile_images/${user.uid}.jpg")
 

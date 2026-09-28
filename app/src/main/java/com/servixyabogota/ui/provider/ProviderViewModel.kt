@@ -119,7 +119,7 @@ class ProviderViewModel : ViewModel() {
                 }
             }
 
-        // 2. Escuchar reseñas recibidas de clientes
+        // 2. Escuchar reseñas recibidas de clientes (tipo != PRESTADOR_A_CLIENTE)
         db.collection("resenas")
             .whereEqualTo("prestadorId", uid)
             .addSnapshotListener { snapshot, error ->
@@ -134,13 +134,22 @@ class ProviderViewModel : ViewModel() {
                     return@addSnapshotListener
                 }
 
-                val docs = snapshot.documents
+                val docsFiltered = snapshot.documents.filter { doc ->
+                    doc.getString("tipo") != "PRESTADOR_A_CLIENTE"
+                }
+
+                if (docsFiltered.isEmpty()) {
+                    listaResenasRecibidas = emptyList()
+                    estaCargandoResenas = false
+                    return@addSnapshotListener
+                }
+
                 val resenasTemp = mutableListOf<ReviewItem>()
                 var procesados = 0
 
-                for (doc in docs) {
+                for (doc in docsFiltered) {
                     val reviewId = doc.id
-                    val clienteId = doc.getString("clienteId") ?: ""
+                    val clienteId = doc.getString("clienteId") ?: doc.getString("autorId") ?: ""
                     val calificacion = doc.getLong("calificacion")?.toInt() ?: 5
                     val comentario = doc.getString("comentario") ?: ""
                     val timestamp = doc.getTimestamp("fecha")
@@ -148,7 +157,7 @@ class ProviderViewModel : ViewModel() {
 
                     val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
                     val fechaFormateada = if (fechaObj != null) sdf.format(fechaObj) else "Reciente"
-                    val nombreDirecto = doc.getString("clienteNombre")
+                    val nombreDirecto = doc.getString("clienteNombre") ?: doc.getString("autorNombre")
 
                     if (!nombreDirecto.isNullOrBlank()) {
                         resenasTemp.add(
@@ -162,7 +171,7 @@ class ProviderViewModel : ViewModel() {
                             )
                         )
                         procesados++
-                        if (procesados == docs.size) {
+                        if (procesados == docsFiltered.size) {
                             listaResenasRecibidas = resenasTemp.sortedByDescending { it.fechaObj }
                             estaCargandoResenas = false
                         }
@@ -190,7 +199,7 @@ class ProviderViewModel : ViewModel() {
                                     )
                                 )
                                 procesados++
-                                if (procesados == docs.size) {
+                                if (procesados == docsFiltered.size) {
                                     listaResenasRecibidas = resenasTemp.sortedByDescending { it.fechaObj }
                                     estaCargandoResenas = false
                                 }
@@ -207,7 +216,7 @@ class ProviderViewModel : ViewModel() {
                                     )
                                 )
                                 procesados++
-                                if (procesados == docs.size) {
+                                if (procesados == docsFiltered.size) {
                                     listaResenasRecibidas = resenasTemp.sortedByDescending { it.fechaObj }
                                     estaCargandoResenas = false
                                 }
@@ -224,7 +233,7 @@ class ProviderViewModel : ViewModel() {
                             )
                         )
                         procesados++
-                        if (procesados == docs.size) {
+                        if (procesados == docsFiltered.size) {
                             listaResenasRecibidas = resenasTemp.sortedByDescending { it.fechaObj }
                             estaCargandoResenas = false
                         }
@@ -232,7 +241,7 @@ class ProviderViewModel : ViewModel() {
                 }
             }
 
-        // 3. Escuchar reseñas otorgadas por el prestador a clientes
+        // 3. Escuchar reseñas otorgadas por el prestador a clientes (autorId == uid)
         db.collection("resenas")
             .whereEqualTo("autorId", uid)
             .addSnapshotListener { snapshot, error ->
@@ -241,13 +250,21 @@ class ProviderViewModel : ViewModel() {
                     return@addSnapshotListener
                 }
 
-                val docs = snapshot.documents
+                val docsFiltered = snapshot.documents.filter { doc ->
+                    doc.getString("tipo") == "PRESTADOR_A_CLIENTE" || doc.getString("destinatarioId") != null
+                }
+
+                if (docsFiltered.isEmpty()) {
+                    listaResenasOtorgadas = emptyList()
+                    return@addSnapshotListener
+                }
+
                 val otorgadasTemp = mutableListOf<ReviewItem>()
                 var procesados = 0
 
-                for (doc in docs) {
+                for (doc in docsFiltered) {
                     val reviewId = doc.id
-                    val clienteId = doc.getString("clienteId") ?: doc.getString("receptorId") ?: ""
+                    val clienteId = doc.getString("destinatarioId") ?: doc.getString("clienteId") ?: doc.getString("receptorId") ?: ""
                     val calificacion = doc.getLong("calificacion")?.toInt() ?: 5
                     val comentario = doc.getString("comentario") ?: ""
                     val timestamp = doc.getTimestamp("fecha")
@@ -255,8 +272,24 @@ class ProviderViewModel : ViewModel() {
 
                     val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
                     val fechaFormateada = if (fechaObj != null) sdf.format(fechaObj) else "Reciente"
+                    val clienteNombreDirecto = doc.getString("destinatarioNombre") ?: doc.getString("clienteNombre")
 
-                    if (clienteId.isNotBlank()) {
+                    if (!clienteNombreDirecto.isNullOrBlank()) {
+                        otorgadasTemp.add(
+                            ReviewItem(
+                                id = reviewId,
+                                nombre = clienteNombreDirecto,
+                                fecha = fechaFormateada,
+                                calificacion = calificacion,
+                                comentario = comentario,
+                                fechaObj = fechaObj
+                            )
+                        )
+                        procesados++
+                        if (procesados == docsFiltered.size) {
+                            listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
+                        }
+                    } else if (clienteId.isNotBlank()) {
                         db.collection("usuarios").document(clienteId).get()
                             .addOnSuccessListener { clientDoc ->
                                 val nombreDoc = clientDoc.getString("nombreCompleto")
@@ -280,19 +313,39 @@ class ProviderViewModel : ViewModel() {
                                     )
                                 )
                                 procesados++
-                                if (procesados == docs.size) {
+                                if (procesados == docsFiltered.size) {
                                     listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
                                 }
                             }
                             .addOnFailureListener {
+                                otorgadasTemp.add(
+                                    ReviewItem(
+                                        id = reviewId,
+                                        nombre = "Cliente ServixYa",
+                                        fecha = fechaFormateada,
+                                        calificacion = calificacion,
+                                        comentario = comentario,
+                                        fechaObj = fechaObj
+                                    )
+                                )
                                 procesados++
-                                if (procesados == docs.size) {
+                                if (procesados == docsFiltered.size) {
                                     listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
                                 }
                             }
                     } else {
+                        otorgadasTemp.add(
+                            ReviewItem(
+                                id = reviewId,
+                                nombre = "Cliente ServixYa",
+                                fecha = fechaFormateada,
+                                calificacion = calificacion,
+                                comentario = comentario,
+                                fechaObj = fechaObj
+                            )
+                        )
                         procesados++
-                        if (procesados == docs.size) {
+                        if (procesados == docsFiltered.size) {
                             listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
                         }
                     }
@@ -677,7 +730,6 @@ class ProviderViewModel : ViewModel() {
         }
 
         viewModelScope.launch {
-
             db.collection("usuarios").document(prestadorId).get()
                 .addOnSuccessListener { docPrestador ->
                     val nombrePrestador = docPrestador.getString("nombreCompleto")
@@ -742,7 +794,7 @@ class ProviderViewModel : ViewModel() {
         db.collection("solicitudes").document(solicitudId).get()
             .addOnSuccessListener { document ->
                 if (document.exists()) {
-                    val solicitud = document.toObject(Solicitud::class.java)?.copy(id = document.id)
+                    val solicitud = document.toObject(Solicitud::class.java)
                     onResult(solicitud)
                 } else {
                     onResult(null)
