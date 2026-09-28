@@ -141,8 +141,11 @@ fun ChatDetailScreen(
 
     val fotoMostrar = interlocutorFotoUrl.takeIf { !it.isNullOrBlank() } ?: uiState.fotoContraparte
 
-    val cotizacionAceptada = uiState.estadoPropuesta == "ACEPTADA" || uiState.mensajes.any { it.esOferta && it.estadoOferta == "ACEPTADA" }
     val servicioCompletado = uiState.estadoSolicitud == "COMPLETADO" || uiState.estadoSolicitud == "COMPLETADA" || uiState.estadoSolicitud == "FINALIZADO"
+    val ultimaOferta = remember(uiState.mensajes) { uiState.mensajes.lastOrNull { it.esOferta } }
+
+    val cotizacionAceptada = !servicioCompletado && (uiState.estadoPropuesta == "ACEPTADA" || ultimaOferta?.estadoOferta == "ACEPTADA")
+    val hayOfertaPendiente = uiState.estadoPropuesta == "PENDIENTE" || ultimaOferta?.estadoOferta == "PENDIENTE"
 
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
@@ -183,19 +186,33 @@ fun ChatDetailScreen(
 
     if (showCalificarDialog) {
         CalificarServicioDialog(
+            esCliente = esCliente,
             onDismiss = { showCalificarDialog = false },
             onEnviar = { calificacion, comentario ->
                 showCalificarDialog = false
-                viewModel.completarServicioYCalificar(
-                    calificacion = calificacion,
-                    comentario = comentario,
-                    onSuccess = {
-                        Toast.makeText(context, "¡Servicio completado y calificado!", Toast.LENGTH_SHORT).show()
-                    },
-                    onError = { err ->
-                        Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
-                    }
-                )
+                if (esCliente) {
+                    viewModel.completarServicioYCalificar(
+                        calificacion = calificacion,
+                        comentario = comentario,
+                        onSuccess = {
+                            Toast.makeText(context, "¡Servicio completado y calificado!", Toast.LENGTH_SHORT).show()
+                        },
+                        onError = { err ->
+                            Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                } else {
+                    viewModel.calificarCliente(
+                        calificacion = calificacion,
+                        comentario = comentario,
+                        onSuccess = {
+                            Toast.makeText(context, "¡Cliente calificado con éxito!", Toast.LENGTH_SHORT).show()
+                        },
+                        onError = { err ->
+                            Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
             }
         )
     }
@@ -308,7 +325,8 @@ fun ChatDetailScreen(
 
                 HorizontalDivider(color = Color(0xFFF1F5F9))
 
-                if (cotizacionAceptada && !servicioCompletado) {
+                // BANNER DE ESTADO Y ACCIONES DE CALIFICACIÓN
+                if (cotizacionAceptada) {
                     Surface(
                         color = Color(0xFFDCFCE7),
                         modifier = Modifier.fillMaxWidth()
@@ -347,6 +365,7 @@ fun ChatDetailScreen(
                         }
                     }
                 } else if (servicioCompletado) {
+                    val yaCalifico = if (esCliente) uiState.clienteCalifico else uiState.prestadorCalifico
                     Surface(
                         color = Color(0xFFF1F5F9),
                         modifier = Modifier.fillMaxWidth()
@@ -356,21 +375,40 @@ fun ChatDetailScreen(
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = Color(0xFF16A34A),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Servicio Completado",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF334155)
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Color(0xFF16A34A),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = if (yaCalifico) "Servicio Completado y Calificado" else "Servicio Completado",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF334155)
+                                )
+                            }
+
+                            if (!yaCalifico) {
+                                Button(
+                                    onClick = { showCalificarDialog = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = colorTema),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = if (esCliente) "Calificar Prestador" else "Calificar Cliente",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -524,7 +562,7 @@ fun ChatDetailScreen(
                             )
                         }
 
-                        if (!esCliente && !cotizacionAceptada && !servicioCompletado) {
+                        if (!esCliente && !cotizacionAceptada && !hayOfertaPendiente && !servicioCompletado) {
                             IconButton(onClick = { showOfertaDialog = true }) {
                                 Icon(
                                     imageVector = Icons.Default.AttachMoney,
@@ -941,17 +979,26 @@ fun OfertaCard(
 
 @Composable
 fun CalificarServicioDialog(
+    esCliente: Boolean,
     onDismiss: () -> Unit,
     onEnviar: (calificacion: Int, comentario: String) -> Unit
 ) {
     var calificacion by remember { mutableIntStateOf(5) }
     var comentario by remember { mutableStateOf("") }
 
+    val tituloDialog = if (esCliente) "Completar y Calificar Servicio" else "Calificar Cliente"
+    val preguntaText = if (esCliente) {
+        "¿Cómo calificas el trabajo realizado por el prestador?"
+    } else {
+        "¿Cómo fue tu experiencia de servicio con este cliente?"
+    }
+    val colorBoton = if (esCliente) Color(0xFF16A34A) else Color(0xFFF97316)
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "Completar y Calificar Servicio",
+                text = tituloDialog,
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp
             )
@@ -963,7 +1010,7 @@ fun CalificarServicioDialog(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "¿Cómo calificas el trabajo realizado por el prestador?",
+                    text = preguntaText,
                     fontSize = 14.sp,
                     color = Color(0xFF475569)
                 )
@@ -990,7 +1037,7 @@ fun CalificarServicioDialog(
                     value = comentario,
                     onValueChange = { comentario = it },
                     label = { Text("Comentario / Opinión") },
-                    placeholder = { Text("Escribe una reseña sobre el servicio...") },
+                    placeholder = { Text("Escribe una reseña...") },
                     modifier = Modifier.fillMaxWidth(),
                     maxLines = 4,
                     minLines = 2,
@@ -1001,10 +1048,14 @@ fun CalificarServicioDialog(
         confirmButton = {
             Button(
                 onClick = { onEnviar(calificacion, comentario) },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                colors = ButtonDefaults.buttonColors(containerColor = colorBoton),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("Completar y Calificar", color = Color.White, fontWeight = FontWeight.Bold)
+                Text(
+                    text = if (esCliente) "Completar y Calificar" else "Enviar Calificación",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
             }
         },
         dismissButton = {
