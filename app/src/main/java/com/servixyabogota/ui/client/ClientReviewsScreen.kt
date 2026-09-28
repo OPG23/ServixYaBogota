@@ -21,6 +21,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.Filter
+import com.google.firebase.firestore.FirebaseFirestore
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 @Composable
 fun ClientReviewsScreen(
@@ -28,46 +33,111 @@ fun ClientReviewsScreen(
 ) {
     var selectedTab by remember { mutableStateOf(0) } // 0 = Otorgadas, 1 = Recibidas
 
-    val recibidasReviews = listOf(
-        ReviewItem(
-            id = "1",
-            nombre = "María López",
-            fecha = "12/08/2026",
-            calificacion = 5,
-            comentario = "Cliente muy amable, dio indicaciones claras para la llegada y realizó el pago oportunamente."
-        ),
-        ReviewItem(
-            id = "2",
-            nombre = "Juan Rodríguez",
-            fecha = "05/07/2026",
-            calificacion = 4,
-            comentario = "Buen cliente, puntual en el pago. La dirección era un poco difícil de encontrar."
-        ),
-        ReviewItem(
-            id = "3",
-            nombre = "Ana García",
-            fecha = "20/06/2026",
-            calificacion = 5,
-            comentario = "Excelente experiencia. El espacio estaba listo para iniciar el trabajo y la comunicación fue sumamente..."
-        )
-    )
+    val db = remember { FirebaseFirestore.getInstance() }
+    val auth = remember { FirebaseAuth.getInstance() }
+    val currentUserId = auth.currentUser?.uid ?: ""
 
-    val otorgadasReviews = listOf(
-        ReviewItem(
-            id = "4",
-            nombre = "Carlos Mendoza",
-            fecha = "15/08/2026",
-            calificacion = 5,
-            comentario = "Excelente servicio de plomería, resolvió la fuga rápidamente y dejó todo limpio."
-        ),
-        ReviewItem(
-            id = "5",
-            nombre = "Pinturas BOG",
-            fecha = "01/08/2026",
-            calificacion = 5,
-            comentario = "Gran trabajo de pintura en el apartamento, muy atentos y acabados de calidad."
-        )
-    )
+    var isLoading by remember { mutableStateOf(true) }
+    var promedioCliente by remember { mutableStateOf(0.0) }
+    var totalEvaluacionesCliente by remember { mutableStateOf(0) }
+
+    var otorgadasReviews by remember { mutableStateOf<List<ReviewItem>>(emptyList()) }
+    var recibidasReviews by remember { mutableStateOf<List<ReviewItem>>(emptyList()) }
+
+    LaunchedEffect(currentUserId) {
+        if (currentUserId.isBlank()) {
+            isLoading = false
+            return@LaunchedEffect
+        }
+
+        val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+
+        // 1. Escuchar promedio de reputación del cliente
+        db.collection("usuarios").document(currentUserId)
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null && snapshot.exists()) {
+                    val calif = snapshot.getDouble("calificacion")
+                        ?: snapshot.getDouble("promedioCalificacion")
+                        ?: 0.0
+                    val total = snapshot.getLong("totalResenas")?.toInt() ?: 0
+
+                    promedioCliente = calif
+                    totalEvaluacionesCliente = total
+                }
+            }
+
+        // 2. Escuchar TODAS las reseñas asociadas al usuario (como autor, cliente o destinatario)
+        val queryResenas = db.collection("resenas")
+            .where(
+                Filter.or(
+                    Filter.equalTo("autorId", currentUserId),
+                    Filter.equalTo("clienteId", currentUserId),
+                    Filter.equalTo("destinatarioId", currentUserId)
+                )
+            )
+
+        queryResenas.addSnapshotListener { snapshot, error ->
+            if (error == null && snapshot != null) {
+                val listaOtorgadas = mutableListOf<ReviewItem>()
+                val listaRecibidas = mutableListOf<ReviewItem>()
+
+                snapshot.documents.forEach { doc ->
+                    val autorId = doc.getString("autorId") ?: ""
+                    val clienteId = doc.getString("clienteId") ?: ""
+                    val destinatarioId = doc.getString("destinatarioId") ?: ""
+                    val tipo = doc.getString("tipo") ?: ""
+
+                    val calificacion = doc.getLong("calificacion")?.toInt() ?: 5
+                    val comentario = doc.getString("comentario") ?: ""
+                    val timestamp = doc.getTimestamp("fecha")
+                    val fechaStr = timestamp?.toDate()?.let { sdf.format(it) } ?: "Reciente"
+
+                    // Discriminación de reseña RECIBIDA vs OTORGADA
+                    val esRecibida = tipo == "PRESTADOR_A_CLIENTE" ||
+                            (destinatarioId == currentUserId && tipo != "CLIENTE_A_PRESTADOR") ||
+                            (clienteId == currentUserId && autorId.isNotBlank() && autorId != currentUserId && tipo != "CLIENTE_A_PRESTADOR")
+
+                    if (esRecibida) {
+                        val nombre = doc.getString("autorNombre")
+                            ?: doc.getString("prestadorNombre")
+                            ?: doc.getString("nombrePrestador")
+                            ?: "Prestador ServixYa"
+
+                        listaRecibidas.add(
+                            ReviewItem(
+                                id = doc.id,
+                                nombre = nombre,
+                                fecha = fechaStr,
+                                calificacion = calificacion,
+                                comentario = comentario
+                            )
+                        )
+                    } else {
+                        // Reseña OTORGADA por el cliente al prestador
+                        val nombre = doc.getString("destinatarioNombre")
+                            ?: doc.getString("prestadorNombre")
+                            ?: doc.getString("nombrePrestador")
+                            ?: doc.getString("nombre")
+                            ?: "Prestador ServixYa"
+
+                        listaOtorgadas.add(
+                            ReviewItem(
+                                id = doc.id,
+                                nombre = nombre,
+                                fecha = fechaStr,
+                                calificacion = calificacion,
+                                comentario = comentario
+                            )
+                        )
+                    }
+                }
+
+                otorgadasReviews = listaOtorgadas
+                recibidasReviews = listaRecibidas
+            }
+            isLoading = false
+        }
+    }
 
     val currentReviews = if (selectedTab == 0) otorgadasReviews else recibidasReviews
 
@@ -138,7 +208,7 @@ fun ClientReviewsScreen(
                             modifier = Modifier.size(28.dp)
                         )
                         Text(
-                            text = "4.9",
+                            text = if (promedioCliente > 0) String.format(Locale.US, "%.1f", promedioCliente) else "5.0",
                             fontSize = 26.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFFF59E0B)
@@ -152,7 +222,7 @@ fun ClientReviewsScreen(
                     }
 
                     Text(
-                        text = "Basado en 8 evaluaciones",
+                        text = "Basado en $totalEvaluacionesCliente evaluaciones",
                         fontSize = 14.sp,
                         color = Color(0xFF64748B)
                     )
@@ -209,12 +279,36 @@ fun ClientReviewsScreen(
                 }
             }
 
-            // 4. LISTA DE RESEÑAS
-            Column(
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                currentReviews.forEach { review ->
-                    ReviewCard(review = review)
+            // 4. LISTA DE RESEÑAS O ESTADO VACÍO
+            if (isLoading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(150.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = Color(0xFF2563EB))
+                }
+            } else if (currentReviews.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (selectedTab == 0) "Aún no has otorgado ninguna reseña." else "Aún no has recibido reseñas de ningún prestador.",
+                        fontSize = 14.sp,
+                        color = Color(0xFF94A3B8)
+                    )
+                }
+            } else {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    currentReviews.forEach { review ->
+                        ReviewCard(review = review)
+                    }
                 }
             }
         }
@@ -284,12 +378,14 @@ fun ReviewCard(review: ReviewItem) {
             }
 
             // Comentario
-            Text(
-                text = review.comentario,
-                fontSize = 14.sp,
-                color = Color(0xFF475569),
-                lineHeight = 20.sp
-            )
+            if (review.comentario.isNotBlank()) {
+                Text(
+                    text = review.comentario,
+                    fontSize = 14.sp,
+                    color = Color(0xFF475569),
+                    lineHeight = 20.sp
+                )
+            }
         }
     }
 }
