@@ -28,10 +28,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// Modelo UI para las reseñas reales
+// Modelo UI para las reseñas reales (incluye fotoUrl)
 data class ReviewItem(
     val id: String = "",
     val nombre: String = "Cliente",
+    val fotoUrl: String = "",
     val fecha: String = "",
     val calificacion: Int = 5,
     val comentario: String = "",
@@ -158,40 +159,37 @@ class ProviderViewModel : ViewModel() {
                     val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
                     val fechaFormateada = if (fechaObj != null) sdf.format(fechaObj) else "Reciente"
                     val nombreDirecto = doc.getString("clienteNombre") ?: doc.getString("autorNombre")
+                    val fotoDirecta = doc.getString("clienteFotoUrl")
+                        ?: doc.getString("autorFotoUrl")
+                        ?: doc.getString("fotoUrl")
+                        ?: ""
 
-                    if (!nombreDirecto.isNullOrBlank()) {
-                        resenasTemp.add(
-                            ReviewItem(
-                                id = reviewId,
-                                nombre = nombreDirecto,
-                                fecha = fechaFormateada,
-                                calificacion = calificacion,
-                                comentario = comentario,
-                                fechaObj = fechaObj
-                            )
-                        )
-                        procesados++
-                        if (procesados == docsFiltered.size) {
-                            listaResenasRecibidas = resenasTemp.sortedByDescending { it.fechaObj }
-                            estaCargandoResenas = false
-                        }
-                    } else if (clienteId.isNotBlank()) {
+                    if (clienteId.isNotBlank()) {
                         db.collection("usuarios").document(clienteId).get()
                             .addOnSuccessListener { clientDoc ->
                                 val nombreDoc = clientDoc.getString("nombreCompleto")
                                 val primerNombre = clientDoc.getString("nombre") ?: ""
-                                val apellido = clientDoc.getString("apellido") ?: ""
+                                val apellido = clientDoc.getString("apellido") ?: clientDoc.getString("apellidos") ?: ""
 
                                 val nombreFinal = when {
+                                    !nombreDirecto.isNullOrBlank() -> nombreDirecto
                                     !nombreDoc.isNullOrBlank() -> nombreDoc
                                     primerNombre.isNotBlank() -> "$primerNombre $apellido".trim()
                                     else -> "Cliente ServixYa"
+                                }
+
+                                val fotoFinal = fotoDirecta.ifBlank {
+                                    clientDoc.getString("fotoUrl")
+                                        ?: clientDoc.getString("fotoPerfilUrl")
+                                        ?: clientDoc.getString("foto")
+                                        ?: ""
                                 }
 
                                 resenasTemp.add(
                                     ReviewItem(
                                         id = reviewId,
                                         nombre = nombreFinal,
+                                        fotoUrl = fotoFinal,
                                         fecha = fechaFormateada,
                                         calificacion = calificacion,
                                         comentario = comentario,
@@ -208,7 +206,8 @@ class ProviderViewModel : ViewModel() {
                                 resenasTemp.add(
                                     ReviewItem(
                                         id = reviewId,
-                                        nombre = "Cliente ServixYa",
+                                        nombre = if (!nombreDirecto.isNullOrBlank()) nombreDirecto else "Cliente ServixYa",
+                                        fotoUrl = fotoDirecta,
                                         fecha = fechaFormateada,
                                         calificacion = calificacion,
                                         comentario = comentario,
@@ -225,7 +224,8 @@ class ProviderViewModel : ViewModel() {
                         resenasTemp.add(
                             ReviewItem(
                                 id = reviewId,
-                                nombre = "Cliente ServixYa",
+                                nombre = if (!nombreDirecto.isNullOrBlank()) nombreDirecto else "Cliente ServixYa",
+                                fotoUrl = fotoDirecta,
                                 fecha = fechaFormateada,
                                 calificacion = calificacion,
                                 comentario = comentario,
@@ -273,39 +273,37 @@ class ProviderViewModel : ViewModel() {
                     val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
                     val fechaFormateada = if (fechaObj != null) sdf.format(fechaObj) else "Reciente"
                     val clienteNombreDirecto = doc.getString("destinatarioNombre") ?: doc.getString("clienteNombre")
+                    val fotoDirecta = doc.getString("destinatarioFotoUrl")
+                        ?: doc.getString("clienteFotoUrl")
+                        ?: doc.getString("fotoUrl")
+                        ?: ""
 
-                    if (!clienteNombreDirecto.isNullOrBlank()) {
-                        otorgadasTemp.add(
-                            ReviewItem(
-                                id = reviewId,
-                                nombre = clienteNombreDirecto,
-                                fecha = fechaFormateada,
-                                calificacion = calificacion,
-                                comentario = comentario,
-                                fechaObj = fechaObj
-                            )
-                        )
-                        procesados++
-                        if (procesados == docsFiltered.size) {
-                            listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
-                        }
-                    } else if (clienteId.isNotBlank()) {
+                    if (clienteId.isNotBlank()) {
                         db.collection("usuarios").document(clienteId).get()
                             .addOnSuccessListener { clientDoc ->
                                 val nombreDoc = clientDoc.getString("nombreCompleto")
                                 val primerNombre = clientDoc.getString("nombre") ?: ""
-                                val apellido = clientDoc.getString("apellido") ?: ""
+                                val apellido = clientDoc.getString("apellido") ?: clientDoc.getString("apellidos") ?: ""
 
                                 val nombreFinal = when {
+                                    !clienteNombreDirecto.isNullOrBlank() -> clienteNombreDirecto
                                     !nombreDoc.isNullOrBlank() -> nombreDoc
                                     primerNombre.isNotBlank() -> "$primerNombre $apellido".trim()
                                     else -> "Cliente ServixYa"
+                                }
+
+                                val fotoFinal = fotoDirecta.ifBlank {
+                                    clientDoc.getString("fotoUrl")
+                                        ?: clientDoc.getString("fotoPerfilUrl")
+                                        ?: clientDoc.getString("foto")
+                                        ?: ""
                                 }
 
                                 otorgadasTemp.add(
                                     ReviewItem(
                                         id = reviewId,
                                         nombre = nombreFinal,
+                                        fotoUrl = fotoFinal,
                                         fecha = fechaFormateada,
                                         calificacion = calificacion,
                                         comentario = comentario,
@@ -321,7 +319,8 @@ class ProviderViewModel : ViewModel() {
                                 otorgadasTemp.add(
                                     ReviewItem(
                                         id = reviewId,
-                                        nombre = "Cliente ServixYa",
+                                        nombre = if (!clienteNombreDirecto.isNullOrBlank()) clienteNombreDirecto else "Cliente ServixYa",
+                                        fotoUrl = fotoDirecta,
                                         fecha = fechaFormateada,
                                         calificacion = calificacion,
                                         comentario = comentario,
@@ -337,7 +336,8 @@ class ProviderViewModel : ViewModel() {
                         otorgadasTemp.add(
                             ReviewItem(
                                 id = reviewId,
-                                nombre = "Cliente ServixYa",
+                                nombre = if (!clienteNombreDirecto.isNullOrBlank()) clienteNombreDirecto else "Cliente ServixYa",
+                                fotoUrl = fotoDirecta,
                                 fecha = fechaFormateada,
                                 calificacion = calificacion,
                                 comentario = comentario,

@@ -18,10 +18,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 import java.util.Locale
 
 @Composable
@@ -230,19 +232,32 @@ private fun ReviewCard(review: ReviewItem) {
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFCBD5E1)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Person,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
+                // Muestra foto si está disponible, o el avatar por defecto si no
+                if (review.fotoUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = review.fotoUrl,
+                        contentDescription = review.nombre,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFE2E8F0))
                     )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFCBD5E1)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Person,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
@@ -262,6 +277,7 @@ private fun ReviewCard(review: ReviewItem) {
                 )
             }
 
+            // Calificación en Estrellas
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (i in 1..5) {
                     val isFilled = i <= review.calificacion
@@ -274,6 +290,7 @@ private fun ReviewCard(review: ReviewItem) {
                 }
             }
 
+            // Comentario
             if (review.comentario.isNotBlank()) {
                 Text(
                     text = review.comentario,
