@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -276,6 +277,13 @@ private fun ProviderCard(
     onClickCard: () -> Unit,
     onIniciarChat: () -> Unit
 ) {
+    // Formato de Calificación: -.- si no tiene reseñas, o 1 decimal si ya tiene
+    val calificacionTexto = if (prestador.totalResenas <= 0 || prestador.calificacion <= 0.0) {
+        "-.-"
+    } else {
+        String.format(Locale.US, "%.1f", prestador.calificacion)
+    }
+
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -344,7 +352,7 @@ private fun ProviderCard(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = prestador.calificacion.toString(),
+                            text = calificacionTexto,
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
                             color = Color(0xFF0F172A)

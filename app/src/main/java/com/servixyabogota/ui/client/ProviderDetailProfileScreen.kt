@@ -36,6 +36,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import java.util.Locale
 
 // Helper para vincular el emoji correcto según la categoría
 fun obtenerEmojiCategoria(categoria: String): String {
@@ -66,6 +67,13 @@ fun ProviderDetailProfileScreen(
 ) {
     // Estado para controlar la foto/video que se está viendo en pantalla completa
     var selectedMediaUrl by remember { mutableStateOf<String?>(null) }
+
+    // Formato de Calificación: -.- si no tiene reseñas, o 1 decimal si ya tiene
+    val calificacionTexto = if (prestador.totalResenas <= 0 || prestador.calificacion <= 0.0) {
+        "-.-"
+    } else {
+        String.format(Locale.US, "%.1f", prestador.calificacion)
+    }
 
     Scaffold(
         topBar = {
@@ -209,7 +217,7 @@ fun ProviderDetailProfileScreen(
                         MetricItem(
                             icon = Icons.Default.Star,
                             iconColor = Color(0xFFF59E0B),
-                            valor = "${prestador.calificacion}",
+                            valor = calificacionTexto,
                             etiqueta = "${prestador.totalResenas} reseñas"
                         )
                         MetricItem(
