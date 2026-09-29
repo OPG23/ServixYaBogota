@@ -29,8 +29,9 @@ fun ClientMainContainer(
     var currentTab by rememberSaveable { mutableStateOf("Inicio") }
     var isCreatingRequest by rememberSaveable { mutableStateOf(false) }
 
-    // Estado para ver el perfil detallado de un prestador
+    // Estado para ver el perfil detallado de un prestador y sus reseñas
     var selectedProviderId by rememberSaveable { mutableStateOf<String?>(null) }
+    var showProviderReviews by rememberSaveable { mutableStateOf(false) }
     val selectedProvider = viewModel.listaPrestadores.find { it.id == selectedProviderId }
 
     // ESTADOS DE CHATS
@@ -60,7 +61,6 @@ fun ClientMainContainer(
             viewModel = chatViewModel,
             onBack = { chatClienteActivo = null },
             onVerPerfilPrestador = { idPrestadorEmitido ->
-                // idPrestadorEmitido es el ID real recuperado por ChatViewModel desde Firestore
                 val idTarget = idPrestadorEmitido.ifBlank { activeChat.prestadorId ?: "" }
 
                 val prestadorEncontrado = viewModel.listaPrestadores.find { prestador ->
@@ -71,11 +71,12 @@ fun ClientMainContainer(
 
                 if (prestadorEncontrado != null) {
                     selectedProviderId = prestadorEncontrado.id
+                    showProviderReviews = false
                     showDirectChats = false
                     chatClienteActivo = null
                 } else if (idTarget.isNotBlank()) {
-                    // Si el ID existe pero no está en la lista reducida, intentamos asignarlo
                     selectedProviderId = idTarget
+                    showProviderReviews = false
                     showDirectChats = false
                     chatClienteActivo = null
                 } else {
@@ -112,18 +113,30 @@ fun ClientMainContainer(
             }
         )
     }
-    // 3. VISTA DE DETALLE DEL PERFIL DEL PRESTADOR
+    // 3. VISTA DE RESEÑAS PÚBLICAS DEL PRESTADOR
+    else if (selectedProvider != null && showProviderReviews) {
+        ProviderPublicReviewsScreen(
+            prestador = selectedProvider,
+            viewModel = viewModel,
+            onBack = { showProviderReviews = false }
+        )
+    }
+    // 4. VISTA DE DETALLE DEL PERFIL DEL PRESTADOR
     else if (selectedProvider != null) {
         val provider = selectedProvider
 
         ProviderDetailProfileScreen(
             prestador = provider,
-            onBack = { selectedProviderId = null },
+            onBack = {
+                selectedProviderId = null
+                showProviderReviews = false
+            },
             onIniciarChat = {
                 viewModel.obtenerOCrearChatDirecto(
                     prestadorId = provider.id,
                     onSuccess = { chatIdReal ->
                         selectedProviderId = null
+                        showProviderReviews = false
                         chatClienteActivo = ChatClienteUi(
                             id = chatIdReal,
                             nombrePrestador = provider.nombre,
@@ -136,10 +149,13 @@ fun ClientMainContainer(
                         Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
                     }
                 )
+            },
+            onVerResenas = {
+                showProviderReviews = true
             }
         )
     }
-    // 4. VISTA DE CHATS DIRECTOS
+    // 5. VISTA DE CHATS DIRECTOS
     else if (showDirectChats) {
         ClientDirectChatsScreen(
             onBack = { showDirectChats = false },
@@ -157,7 +173,7 @@ fun ClientMainContainer(
             }
         )
     }
-    // 5. NAVEGACIÓN PRINCIPAL DE TABS
+    // 6. NAVEGACIÓN PRINCIPAL DE TABS
     else {
         when (currentTab) {
             "Inicio" -> {
@@ -167,6 +183,7 @@ fun ClientMainContainer(
                         currentSettingsSubScreen = null
                         selectedProposalRequestId = null
                         showDirectChats = false
+                        showProviderReviews = false
                         currentTab = selectedTab
                     },
                     onIniciarChat = { prestador ->
@@ -188,6 +205,7 @@ fun ClientMainContainer(
                     },
                     onVerPerfilPrestador = { prestador ->
                         selectedProviderId = prestador.id
+                        showProviderReviews = false
                     }
                 )
             }
@@ -198,6 +216,7 @@ fun ClientMainContainer(
                         currentSettingsSubScreen = null
                         selectedProposalRequestId = null
                         showDirectChats = false
+                        showProviderReviews = false
                         currentTab = selectedTab
                     },
                     onNuevaSolicitudClick = { isCreatingRequest = true },
@@ -235,6 +254,7 @@ fun ClientMainContainer(
                             currentSettingsSubScreen = null
                             selectedProposalRequestId = null
                             showDirectChats = false
+                            showProviderReviews = false
                             currentTab = selectedTab
                         },
                         onVerPropuestasClick = { id ->

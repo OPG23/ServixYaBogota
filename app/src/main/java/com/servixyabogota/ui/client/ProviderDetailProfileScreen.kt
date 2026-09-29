@@ -63,7 +63,8 @@ fun esVideoUrl(url: String): Boolean {
 fun ProviderDetailProfileScreen(
     prestador: ClientProviderModel,
     onBack: () -> Unit,
-    onIniciarChat: () -> Unit
+    onIniciarChat: () -> Unit,
+    onVerResenas: () -> Unit
 ) {
     // Estado para controlar la foto/video que se está viendo en pantalla completa
     var selectedMediaUrl by remember { mutableStateOf<String?>(null) }
@@ -212,20 +213,35 @@ fun ProviderDetailProfileScreen(
                     // Calificación y Experiencia
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceAround
+                        horizontalArrangement = Arrangement.SpaceAround,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        MetricItem(
-                            icon = Icons.Default.Star,
-                            iconColor = Color(0xFFF59E0B),
-                            valor = calificacionTexto,
-                            etiqueta = "${prestador.totalResenas} reseñas"
-                        )
-                        MetricItem(
-                            icon = Icons.Default.Work,
-                            iconColor = Color(0xFF2563EB),
-                            valor = "${prestador.experienciaAnos} años",
-                            etiqueta = "Experiencia"
-                        )
+                        // Elemento Cliqueable para Reseñas
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onVerResenas() }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            MetricItem(
+                                icon = Icons.Default.Star,
+                                iconColor = Color(0xFFF59E0B),
+                                valor = calificacionTexto,
+                                etiqueta = "${prestador.totalResenas} reseñas"
+                            )
+                        }
+
+                        // Elemento Informativo de Experiencia
+                        Box(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            MetricItem(
+                                icon = Icons.Default.Work,
+                                iconColor = Color(0xFF2563EB),
+                                valor = "${prestador.experienciaAnos} años",
+                                etiqueta = "Experiencia"
+                            )
+                        }
                     }
                 }
             }
@@ -328,7 +344,6 @@ fun ProviderDetailProfileScreen(
                                     modifier = Modifier.fillMaxSize()
                                 )
 
-                                // Si es video, superponemos un ícono de reproducción (Play)
                                 if (esVideo) {
                                     Box(
                                         modifier = Modifier
@@ -368,10 +383,6 @@ fun ProviderDetailProfileScreen(
     }
 }
 
-// ==========================================
-// COMPOSABLE VISUALIZADOR PANTALLA COMPLETA
-// ==========================================
-
 @Composable
 fun FullscreenMediaDialog(
     mediaUrl: String,
@@ -389,7 +400,6 @@ fun FullscreenMediaDialog(
                 .background(Color.Black)
         ) {
             if (esVideo) {
-                // Reproductor nativo para videos
                 AndroidView(
                     factory = { context ->
                         VideoView(context).apply {
@@ -406,7 +416,6 @@ fun FullscreenMediaDialog(
                         .align(Alignment.Center)
                 )
             } else {
-                // Visualizador de foto amplia
                 AsyncImage(
                     model = mediaUrl,
                     contentDescription = "Imagen ampliada",
@@ -417,7 +426,6 @@ fun FullscreenMediaDialog(
                 )
             }
 
-            // Botón superior de Cierre (X)
             IconButton(
                 onClick = onDismiss,
                 modifier = Modifier
