@@ -38,7 +38,16 @@ fun ProviderPublicReviewsScreen(
 
     val resenas = viewModel.listaResenasDelPrestador
     val estaCargando = viewModel.estaCargandoResenasPrestador
-    val promedioTexto = String.format(Locale.US, "%.1f", prestador.calificacion)
+
+    // CÁLCULO DINÁMICO DEL PROMEDIO Y TOTAL DE RESEÑAS
+    val totalResenasReal = if (!estaCargando && resenas.isNotEmpty()) resenas.size else prestador.totalResenas
+    val promedioReal = if (!estaCargando && resenas.isNotEmpty()) {
+        resenas.map { it.calificacion }.average()
+    } else {
+        prestador.calificacion
+    }
+
+    val promedioTexto = String.format(Locale.US, "%.1f", promedioReal)
     val nombrePrimerPalabra = prestador.nombre.split(" ").firstOrNull() ?: prestador.nombre
 
     Scaffold(
@@ -83,7 +92,7 @@ fun ProviderPublicReviewsScreen(
                 )
             }
 
-            // 2. RESUMEN DE PROMEDIO
+            // 2. RESUMEN DE PROMEDIO (ACTUALIZADO CON CÁLCULO REAL)
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(16.dp),
@@ -122,7 +131,7 @@ fun ProviderPublicReviewsScreen(
                     }
 
                     Text(
-                        text = "Basado en ${prestador.totalResenas} evaluación${if (prestador.totalResenas != 1) "es" else ""}",
+                        text = "Basado en $totalResenasReal evaluación${if (totalResenasReal != 1) "es" else ""}",
                         fontSize = 14.sp,
                         color = Color(0xFF64748B)
                     )
@@ -181,7 +190,6 @@ private fun PublicReviewCard(review: ReviewItem) {
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // FOTO DE PERFIL DEL CLIENTE CON ASYNCIMAGE (o ícono predeterminado si no tiene)
                 Box(
                     modifier = Modifier
                         .size(42.dp)
@@ -223,7 +231,6 @@ private fun PublicReviewCard(review: ReviewItem) {
                 )
             }
 
-            // Calificación en Estrellas
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (i in 1..5) {
                     val isFilled = i <= review.calificacion
@@ -236,7 +243,6 @@ private fun PublicReviewCard(review: ReviewItem) {
                 }
             }
 
-            // Mensaje / Comentario
             if (review.comentario.isNotBlank()) {
                 Text(
                     text = review.comentario,

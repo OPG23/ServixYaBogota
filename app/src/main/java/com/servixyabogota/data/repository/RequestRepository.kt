@@ -101,10 +101,6 @@ class SolicitudRepository {
     }
 
     /**
-     * Marca el servicio como COMPLETADO, registra la reseña/calificación con el nombre del cliente
-     * y recalcula el promedio de estrellas del prestador en Firestore.
-     */
-    /**
      * Marca el servicio como COMPLETADO (ya sea en solicitudes o chats directos),
      * registra la reseña en 'resenas' y recalcula el promedio de estrellas del prestador.
      */
@@ -137,13 +133,16 @@ class SolicitudRepository {
             ))
         }
 
-        // 2. Crear documento de reseña independiente (sirve tanto para chats como solicitudes)
+        // 2. Crear documento de reseña independiente con autoría clara
         val resenaRef = db.collection("resenas").document()
         val nuevaResena = hashMapOf(
             "solicitudId" to solicitudId,
             "chatId" to solicitudId,
             "clienteId" to clienteId,
             "clienteNombre" to clienteNombre,
+            "autorId" to clienteId,                    // Identifica al cliente como autor
+            "autorNombre" to clienteNombre,
+            "tipo" to "CLIENTE_A_PRESTADOR",            // Tipo explícito
             "prestadorId" to prestadorId,
             "calificacion" to calificacion,
             "comentario" to comentario,
@@ -154,21 +153,27 @@ class SolicitudRepository {
         // Guardar cambios en lote
         batch.commit().await()
 
-        // 3. Recalcular el promedio total de estrellas del prestador
+        // 3. Recalcular el promedio MENTIENENDO SOLO RESEÑAS DE CLIENTES -> PRESTADOR
         val resenasQuery = db.collection("resenas")
             .whereEqualTo("prestadorId", prestadorId)
             .get()
             .await()
 
-        val docs = resenasQuery.documents
-        val totalResenas = docs.size
+        // FILTRO CLAVE: Descartar las reseñas hechas por el mismo prestador o dirigidas al cliente
+        val docsValidos = resenasQuery.documents.filter { doc ->
+            val tipo = doc.getString("tipo") ?: ""
+            val autorId = doc.getString("autorId") ?: ""
+            tipo != "PRESTADOR_A_CLIENTE" && autorId != prestadorId
+        }
 
-        val suma = docs.sumOf { doc ->
+        val totalResenas = docsValidos.size
+
+        val suma = docsValidos.sumOf { doc ->
             (doc.get("calificacion") as? Number)?.toDouble() ?: calificacion.toDouble()
         }
         val nuevoPromedio = if (totalResenas > 0) suma / totalResenas else 5.0
 
-        // Actualizar perfil del prestador con los alias de calificaciones
+        // Actualizar perfil del prestador en Firestore con el total y promedio corregidos
         db.collection("usuarios").document(prestadorId)
             .update(
                 mapOf(
