@@ -109,11 +109,25 @@ fun ClientReviewsScreen(
                         val timestamp = doc.getTimestamp("fecha")
                         val fechaStr = timestamp?.toDate()?.let { sdf.format(it) } ?: "Reciente"
 
-                        val esRecibida = tipo == "PRESTADOR_A_CLIENTE" ||
-                                (destinatarioId == currentUserId && tipo != "CLIENTE_A_PRESTADOR") ||
-                                (clienteId == currentUserId && autorId.isNotBlank() && autorId != currentUserId && tipo != "CLIENTE_A_PRESTADOR")
+                        // CLASIFICACIÓN RIGUROSA: Determinar si la reseña fue recibida o dada
+                        val esRecibida: Boolean = when {
+                            // 1. Prioridad por tipo de reseña explícito
+                            tipo == "PRESTADOR_A_CLIENTE" -> true
+                            tipo == "CLIENTE_A_PRESTADOR" -> false
 
-                        // Determinar el ID del prestador involucrado
+                            // 2. Prioridad por autoría explícita
+                            autorId.isNotBlank() && autorId == currentUserId -> false
+                            autorId.isNotBlank() && autorId != currentUserId -> true
+
+                            // 3. Prioridad por destinatario explícito
+                            destinatarioId.isNotBlank() && destinatarioId == currentUserId -> true
+                            destinatarioId.isNotBlank() && destinatarioId != currentUserId -> false
+
+                            // 4. Fallback para documentos sin campos estandarizados
+                            else -> doc.contains("clienteFotoUrl") || doc.contains("clienteFoto")
+                        }
+
+                        // Determinar el ID del prestador a consultar
                         val idPrestador = if (esRecibida) {
                             autorId.ifBlank { prestadorIdDoc }
                         } else {
@@ -130,17 +144,20 @@ fun ClientReviewsScreen(
                                 if (userDoc.exists()) {
                                     val nom = userDoc.getString("nombre") ?: ""
                                     val ape = userDoc.getString("apellido") ?: userDoc.getString("apellidos") ?: ""
-                                    nombreCompleto = "$nom $ape".trim()
+                                    val nombreDoc = userDoc.getString("nombreCompleto") ?: ""
+
+                                    nombreCompleto = if (nombreDoc.isNotBlank()) nombreDoc else "$nom $ape".trim()
 
                                     fotoUrl = userDoc.getString("fotoUrl")
                                         ?: userDoc.getString("fotoPerfilUrl")
+                                                ?: userDoc.getString("fotoPerfil")
                                                 ?: userDoc.getString("foto")
                                                 ?: ""
                                 }
                             } catch (_: Exception) { }
                         }
 
-                        // Fallback a los datos guardados directamente en el documento de reseña
+                        // Fallbacks de nombre y foto si no existen en /usuarios
                         if (nombreCompleto.isBlank()) {
                             nombreCompleto = if (esRecibida) {
                                 doc.getString("autorNombre")
@@ -156,10 +173,17 @@ fun ClientReviewsScreen(
                         }
 
                         if (fotoUrl.isBlank()) {
-                            fotoUrl = doc.getString("fotoUrl")
-                                ?: doc.getString("destinatarioFotoUrl")
-                                        ?: doc.getString("autorFotoUrl")
-                                        ?: ""
+                            fotoUrl = if (esRecibida) {
+                                doc.getString("autorFotoUrl")
+                                    ?: doc.getString("autorFoto")
+                                    ?: doc.getString("fotoUrl")
+                                    ?: ""
+                            } else {
+                                doc.getString("destinatarioFotoUrl")
+                                    ?: doc.getString("destinatarioFoto")
+                                    ?: doc.getString("fotoUrl")
+                                    ?: ""
+                            }
                         }
 
                         val item = ReviewDisplayItem(
@@ -376,7 +400,6 @@ fun ReviewCard(review: ReviewDisplayItem) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Header del Card: Foto/Avatar, Nombre y Fecha
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -425,7 +448,6 @@ fun ReviewCard(review: ReviewDisplayItem) {
                 )
             }
 
-            // Estrellas
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (i in 1..5) {
                     val isFilled = i <= review.calificacion
@@ -438,7 +460,6 @@ fun ReviewCard(review: ReviewDisplayItem) {
                 }
             }
 
-            // Comentario
             if (review.comentario.isNotBlank()) {
                 Text(
                     text = review.comentario,
