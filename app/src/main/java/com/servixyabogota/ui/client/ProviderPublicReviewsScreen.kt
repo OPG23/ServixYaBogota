@@ -19,9 +19,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import java.util.Locale
 
 @Composable
@@ -30,7 +32,6 @@ fun ProviderPublicReviewsScreen(
     viewModel: ClientViewModel,
     onBack: () -> Unit
 ) {
-    // Carga en tiempo real las reseñas que pertenecen a este prestador
     LaunchedEffect(prestador.id) {
         viewModel.cargarResenasDelPrestador(prestador.id)
     }
@@ -180,6 +181,7 @@ private fun PublicReviewCard(review: ReviewItem) {
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // FOTO DE PERFIL DEL CLIENTE CON ASYNCIMAGE (o ícono predeterminado si no tiene)
                 Box(
                     modifier = Modifier
                         .size(42.dp)
@@ -187,12 +189,21 @@ private fun PublicReviewCard(review: ReviewItem) {
                         .background(Color(0xFFCBD5E1)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Person,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    if (!review.fotoUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = review.fotoUrl,
+                            contentDescription = review.nombre,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Outlined.Person,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
@@ -225,7 +236,7 @@ private fun PublicReviewCard(review: ReviewItem) {
                 }
             }
 
-            // Mensaje/Comentario
+            // Mensaje / Comentario
             if (review.comentario.isNotBlank()) {
                 Text(
                     text = review.comentario,

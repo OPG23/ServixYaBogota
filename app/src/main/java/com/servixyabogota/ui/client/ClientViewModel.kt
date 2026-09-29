@@ -30,7 +30,8 @@ data class ReviewItem(
     val fecha: String = "",
     val calificacion: Int = 5,
     val comentario: String = "",
-    val fechaObj: Date? = null
+    val fechaObj: Date? = null,
+    val fotoUrl: String? = null
 )
 
 class ClientViewModel : ViewModel() {
@@ -759,6 +760,9 @@ class ClientViewModel : ViewModel() {
     /**
      * Consulta en Firestore todas las reseñas recibidas por un prestador específico
      */
+    /**
+     * Consulta en Firestore todas las reseñas recibidas por un prestador específico
+     */
     fun cargarResenasDelPrestador(prestadorId: String) {
         if (prestadorId.isBlank()) return
         estaCargandoResenasPrestador = true
@@ -767,7 +771,6 @@ class ClientViewModel : ViewModel() {
             .whereEqualTo("prestadorId", prestadorId)
             .addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null || snapshot.documents.isEmpty()) {
-                    // Si la consulta por 'prestadorId' no trae resultados, probamos por 'destinatarioId'
                     db.collection("resenas")
                         .whereEqualTo("destinatarioId", prestadorId)
                         .addSnapshotListener { snapshot2, error2 ->
@@ -776,12 +779,154 @@ class ClientViewModel : ViewModel() {
                                 estaCargandoResenasPrestador = false
                                 return@addSnapshotListener
                             }
-                            procesarDocumentosResenasPrestador(snapshot2.documents)
+                            procesarDocumentosResenasPrestador(snapshot2.documents, prestadorId)
                         }
                     return@addSnapshotListener
                 }
-                procesarDocumentosResenasPrestador(snapshot.documents)
+                procesarDocumentosResenasPrestador(snapshot.documents, prestadorId)
             }
+    }
+
+    private fun procesarDocumentosResenasPrestador(
+        documents: List<com.google.firebase.firestore.DocumentSnapshot>,
+        prestadorId: String
+    ) {
+        val resenasTemp = mutableListOf<ReviewItem>()
+
+        // Descartamos las reseñas hechas de Prestador a Cliente o donde el autor sea el prestador
+        val docsFiltrados = documents.filter { doc ->
+            val tipo = doc.getString("tipo") ?: ""
+            val autorId = doc.getString("autorId") ?: ""
+
+            tipo != "PRESTADOR_A_CLIENTE" && autorId != prestadorId
+        }
+
+        if (docsFiltrados.isEmpty()) {
+            listaResenasDelPrestador = emptyList()
+            estaCargandoResenasPrestador = false
+            return
+        }
+
+        var procesados = 0
+
+        for (doc in docsFiltrados) {
+            val reviewId = doc.id
+
+            // Extraemos el ID del cliente (priorizando clienteId)
+            val clienteUid = doc.getString("clienteId")
+                ?.takeIf { it.isNotBlank() && it != prestadorId }
+                ?: doc.getString("autorId")
+                    ?.takeIf { it.isNotBlank() && it != prestadorId }
+                ?: ""
+
+            val calificacion = doc.getLong("calificacion")?.toInt() ?: 5
+            val comentario = doc.getString("comentario") ?: ""
+            val timestamp = doc.getTimestamp("fecha")
+            val fechaObj = timestamp?.toDate()
+
+            val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+            val fechaFormateada = if (fechaObj != null) sdf.format(fechaObj) else "Reciente"
+
+            val autorNombreDirecto = doc.getString("clienteNombre")
+                ?: doc.getString("autorNombre")
+
+            val fotoDirecta = doc.getString("clienteFotoUrl")
+                ?: doc.getString("clienteFoto")
+                ?: doc.getString("autorFoto")
+                ?: doc.getString("autorFotoUrl")
+
+            // Si el documento de la reseña ya contiene la URL de la foto
+            if (!autorNombreDirecto.isNullOrBlank() && !fotoDirecta.isNullOrBlank()) {
+                resenasTemp.add(
+                    ReviewItem(
+                        id = reviewId,
+                        nombre = autorNombreDirecto,
+                        fecha = fechaFormateada,
+                        calificacion = calificacion,
+                        comentario = comentario,
+                        fechaObj = fechaObj,
+                        fotoUrl = fotoDirecta
+                    )
+                )
+                procesados++
+                if (procesados == docsFiltrados.size) {
+                    listaResenasDelPrestador = resenasTemp.sortedByDescending { it.fechaObj }
+                    estaCargandoResenasPrestador = false
+                }
+            } else if (clienteUid.isNotBlank()) {
+                // Consultamos el documento del cliente en 'usuarios' usando su clienteId/fotoUrl
+                db.collection("usuarios").document(clienteUid).get()
+                    .addOnSuccessListener { userDoc ->
+                        val nombreDoc = userDoc.getString("nombreCompleto")
+                        val primerNombre = userDoc.getString("nombre") ?: ""
+                        val apellido = userDoc.getString("apellido") ?: ""
+
+                        val nombreFinal = when {
+                            !autorNombreDirecto.isNullOrBlank() -> autorNombreDirecto
+                            !nombreDoc.isNullOrBlank() -> nombreDoc
+                            primerNombre.isNotBlank() -> "$primerNombre $apellido".trim()
+                            else -> "Cliente ServixYa"
+                        }
+
+                        val fotoUrlUser = userDoc.getString("fotoUrl")
+                            ?: userDoc.getString("photoUrl")
+                            ?: userDoc.getString("fotoPerfil")
+                            ?: userDoc.getString("foto")
+
+                        resenasTemp.add(
+                            ReviewItem(
+                                id = reviewId,
+                                nombre = nombreFinal,
+                                fecha = fechaFormateada,
+                                calificacion = calificacion,
+                                comentario = comentario,
+                                fechaObj = fechaObj,
+                                fotoUrl = fotoUrlUser
+                            )
+                        )
+                        procesados++
+                        if (procesados == docsFiltrados.size) {
+                            listaResenasDelPrestador = resenasTemp.sortedByDescending { it.fechaObj }
+                            estaCargandoResenasPrestador = false
+                        }
+                    }
+                    .addOnFailureListener {
+                        resenasTemp.add(
+                            ReviewItem(
+                                id = reviewId,
+                                nombre = autorNombreDirecto ?: "Cliente ServixYa",
+                                fecha = fechaFormateada,
+                                calificacion = calificacion,
+                                comentario = comentario,
+                                fechaObj = fechaObj,
+                                fotoUrl = fotoDirecta
+                            )
+                        )
+                        procesados++
+                        if (procesados == docsFiltrados.size) {
+                            listaResenasDelPrestador = resenasTemp.sortedByDescending { it.fechaObj }
+                            estaCargandoResenasPrestador = false
+                        }
+                    }
+            } else {
+                resenasTemp.add(
+                    ReviewItem(
+                        id = reviewId,
+                        nombre = autorNombreDirecto ?: "Cliente ServixYa",
+                        fecha = fechaFormateada,
+                        calificacion = calificacion,
+                        comentario = comentario,
+                        fechaObj = fechaObj,
+                        fotoUrl = fotoDirecta
+                    )
+                )
+                procesados++
+                if (procesados == docsFiltrados.size) {
+                    listaResenasDelPrestador = resenasTemp.sortedByDescending { it.fechaObj }
+                    estaCargandoResenasPrestador = false
+                }
+            }
+        }
     }
 
     private fun procesarDocumentosResenasPrestador(documents: List<com.google.firebase.firestore.DocumentSnapshot>) {
@@ -810,9 +955,13 @@ class ClientViewModel : ViewModel() {
 
             val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
             val fechaFormateada = if (fechaObj != null) sdf.format(fechaObj) else "Reciente"
-            val autorNombreDirecto = doc.getString("autorNombre") ?: doc.getString("clienteNombre")
 
-            if (!autorNombreDirecto.isNullOrBlank()) {
+            val autorNombreDirecto = doc.getString("autorNombre") ?: doc.getString("clienteNombre")
+            val fotoDirecta = doc.getString("autorFoto")
+                ?: doc.getString("clienteFoto")
+                ?: doc.getString("autorFotoUrl")
+
+            if (!autorNombreDirecto.isNullOrBlank() && !fotoDirecta.isNullOrBlank()) {
                 resenasTemp.add(
                     ReviewItem(
                         id = reviewId,
@@ -820,7 +969,8 @@ class ClientViewModel : ViewModel() {
                         fecha = fechaFormateada,
                         calificacion = calificacion,
                         comentario = comentario,
-                        fechaObj = fechaObj
+                        fechaObj = fechaObj,
+                        fotoUrl = fotoDirecta
                     )
                 )
                 procesados++
@@ -836,10 +986,16 @@ class ClientViewModel : ViewModel() {
                         val apellido = userDoc.getString("apellido") ?: ""
 
                         val nombreFinal = when {
+                            !autorNombreDirecto.isNullOrBlank() -> autorNombreDirecto
                             !nombreDoc.isNullOrBlank() -> nombreDoc
                             primerNombre.isNotBlank() -> "$primerNombre $apellido".trim()
                             else -> "Cliente ServixYa"
                         }
+
+                        val fotoUrlUser = userDoc.getString("fotoUrl")
+                            ?: userDoc.getString("fotoPerfil")
+                            ?: userDoc.getString("foto")
+                            ?: fotoDirecta
 
                         resenasTemp.add(
                             ReviewItem(
@@ -848,7 +1004,8 @@ class ClientViewModel : ViewModel() {
                                 fecha = fechaFormateada,
                                 calificacion = calificacion,
                                 comentario = comentario,
-                                fechaObj = fechaObj
+                                fechaObj = fechaObj,
+                                fotoUrl = fotoUrlUser
                             )
                         )
                         procesados++
@@ -861,11 +1018,12 @@ class ClientViewModel : ViewModel() {
                         resenasTemp.add(
                             ReviewItem(
                                 id = reviewId,
-                                nombre = "Cliente ServixYa",
+                                nombre = autorNombreDirecto ?: "Cliente ServixYa",
                                 fecha = fechaFormateada,
                                 calificacion = calificacion,
                                 comentario = comentario,
-                                fechaObj = fechaObj
+                                fechaObj = fechaObj,
+                                fotoUrl = fotoDirecta
                             )
                         )
                         procesados++
@@ -878,11 +1036,12 @@ class ClientViewModel : ViewModel() {
                 resenasTemp.add(
                     ReviewItem(
                         id = reviewId,
-                        nombre = "Cliente ServixYa",
+                        nombre = autorNombreDirecto ?: "Cliente ServixYa",
                         fecha = fechaFormateada,
                         calificacion = calificacion,
                         comentario = comentario,
-                        fechaObj = fechaObj
+                        fechaObj = fechaObj,
+                        fotoUrl = fotoDirecta
                     )
                 )
                 procesados++
