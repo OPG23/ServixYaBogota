@@ -118,7 +118,9 @@ class ChatViewModel : ViewModel() {
                         ?: snapshot.getString("propuestaPrestadorId")
                         ?: ""
 
-                    val idContraparte = if (esCliente) prestadorId else clienteId
+                    val idContraparteCalculado = if (esCliente) prestadorId else clienteId
+                    // PROTECCIÓN: Si el documento raíz no tiene idContraparte, conservamos el ya detectado por mensajes
+                    val idContraparteFinal = idContraparteCalculado.ifBlank { _uiState.value.idContraparte }
                     val rolContraparte = if (esCliente) "Prestador" else "Cliente"
 
                     _uiState.value = _uiState.value.copy(
@@ -127,13 +129,13 @@ class ChatViewModel : ViewModel() {
                         estadoSolicitud = estadoSolicitud,
                         clienteCalifico = clienteCalifico,
                         prestadorCalifico = prestadorCalifico,
-                        idContraparte = idContraparte,
+                        idContraparte = idContraparteFinal,
                         rolContraparte = rolContraparte,
                         esChatDirecto = false
                     )
 
-                    if (idContraparte.isNotBlank()) {
-                        cargarDatosContraparte(idContraparte)
+                    if (idContraparteFinal.isNotBlank()) {
+                        cargarDatosContraparte(idContraparteFinal)
                     }
                 } else {
                     _uiState.value = _uiState.value.copy(isLoading = false)
@@ -159,7 +161,8 @@ class ChatViewModel : ViewModel() {
                     val clienteCalifico = snapshot.getBoolean("clienteCalifico") ?: false
                     val prestadorCalifico = snapshot.getBoolean("prestadorCalifico") ?: _uiState.value.prestadorCalifico
 
-                    val idContraparte = if (esCliente) prestadorId else clienteId
+                    val idContraparteCalculado = if (esCliente) prestadorId else clienteId
+                    val idContraparteFinal = idContraparteCalculado.ifBlank { _uiState.value.idContraparte }
                     val rolContraparte = if (esCliente) "Prestador" else "Cliente"
 
                     _uiState.value = _uiState.value.copy(
@@ -168,13 +171,13 @@ class ChatViewModel : ViewModel() {
                         estadoSolicitud = estadoSolicitud,
                         clienteCalifico = clienteCalifico,
                         prestadorCalifico = prestadorCalifico,
-                        idContraparte = idContraparte,
+                        idContraparte = idContraparteFinal,
                         rolContraparte = rolContraparte,
                         esChatDirecto = true
                     )
 
-                    if (idContraparte.isNotBlank()) {
-                        cargarDatosContraparte(idContraparte)
+                    if (idContraparteFinal.isNotBlank()) {
+                        cargarDatosContraparte(idContraparteFinal)
                     }
                 } else {
                     _uiState.value = _uiState.value.copy(isLoading = false)
@@ -233,6 +236,7 @@ class ChatViewModel : ViewModel() {
                     val foto = doc.getString("fotoUrl") ?: doc.getString("fotoPerfil") ?: ""
 
                     _uiState.value = _uiState.value.copy(
+                        idContraparte = userId,
                         nombreContraparte = nombreFinal,
                         fotoContraparte = foto
                     )
@@ -261,6 +265,7 @@ class ChatViewModel : ViewModel() {
                         val texto = doc.getString("texto") ?: ""
                         val timestamp = doc.getTimestamp("fechaEnvio")
                         val fecha = timestamp?.toDate() ?: Date()
+
                         val mediaUrl = doc.getString("mediaUrl") ?: doc.getString("imagenUrl")
                         val esVideo = doc.getBoolean("esVideo") ?: false
 
@@ -290,9 +295,6 @@ class ChatViewModel : ViewModel() {
                         )
                     }
 
-                    // RESOLUCIÓN AUTOMÁTICA DE CONTRAPARTE
-                    // Si idContraparte sigue estando vacío (común en chats de propuestas),
-                    // se toma el ID del emisor que NO es el usuario actual.
                     var contraparteIdFinal = _uiState.value.idContraparte
                     if (contraparteIdFinal.isBlank()) {
                         val contraparteDetectada = listaMensajes.firstOrNull {
@@ -351,7 +353,7 @@ class ChatViewModel : ViewModel() {
         val nuevoMensaje = hashMapOf(
             "emisorId" to currentUserIdActual,
             "texto" to texto.trim(),
-            "fechaEnvio" to Timestamp.now(),
+            "fechaEnvio" to FieldValue.serverTimestamp(),
             "mediaUrl" to (mediaUrl ?: ""),
             "imagenUrl" to (mediaUrl ?: ""),
             "esVideo" to esVideo,
@@ -376,7 +378,7 @@ class ChatViewModel : ViewModel() {
             .addOnSuccessListener {
                 val datosUltimoMensaje = mapOf(
                     "ultimoMensaje" to textoResumen,
-                    "fechaUltimoMensaje" to Timestamp.now(),
+                    "fechaUltimoMensaje" to FieldValue.serverTimestamp(),
                     "ultimoEmisorId" to currentUserIdActual,
                     campoNoLeidosDestinatario to FieldValue.increment(1)
                 )
@@ -447,7 +449,7 @@ class ChatViewModel : ViewModel() {
             "id" to refMensaje.id,
             "emisorId" to currentUserIdActual,
             "texto" to textoFormateado,
-            "fechaEnvio" to Timestamp.now(),
+            "fechaEnvio" to FieldValue.serverTimestamp(),
             "mediaUrl" to "",
             "imagenUrl" to "",
             "esVideo" to false,
@@ -464,7 +466,7 @@ class ChatViewModel : ViewModel() {
 
         val datosUltimoMensaje = mutableMapOf<String, Any>(
             "ultimoMensaje" to "Oferta de servicio: $$monto",
-            "fechaUltimoMensaje" to Timestamp.now(),
+            "fechaUltimoMensaje" to FieldValue.serverTimestamp(),
             "ultimoEmisorId" to currentUserIdActual,
             "propuestaMonto" to monto,
             "estadoPropuesta" to "PENDIENTE",
@@ -629,7 +631,7 @@ class ChatViewModel : ViewModel() {
                                     "tipo" to "PRESTADOR_A_CLIENTE",
                                     "calificacion" to calificacion,
                                     "comentario" to comentario.trim(),
-                                    "fecha" to Timestamp.now()
+                                    "fecha" to FieldValue.serverTimestamp()
                                 )
                                 batch.set(refResena, nuevaResena)
 
