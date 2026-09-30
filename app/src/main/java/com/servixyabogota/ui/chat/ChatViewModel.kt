@@ -115,6 +115,7 @@ class ChatViewModel : ViewModel() {
                     val prestadorId = snapshot.getString("prestadorId")
                         ?: snapshot.getString("idPrestador")
                         ?: snapshot.getString("prestadorSeleccionadoId")
+                        ?: snapshot.getString("propuestaPrestadorId")
                         ?: ""
 
                     val idContraparte = if (esCliente) prestadorId else clienteId
@@ -181,9 +182,6 @@ class ChatViewModel : ViewModel() {
             }
     }
 
-    /**
-     * Escucha en tiempo real la colección 'resenas' para validar si el prestador ya calificó este chat/solicitud
-     */
     private fun escucharEstadoCalificacion(chatId: String, currentUserId: String) {
         resenasListener?.remove()
 
@@ -205,6 +203,8 @@ class ChatViewModel : ViewModel() {
     }
 
     private fun cargarDatosContraparte(userId: String) {
+        if (userId.isBlank()) return
+
         db.collection("usuarios").document(userId).get()
             .addOnSuccessListener { doc ->
                 if (doc.exists()) {
@@ -290,8 +290,24 @@ class ChatViewModel : ViewModel() {
                         )
                     }
 
+                    // RESOLUCIÓN AUTOMÁTICA DE CONTRAPARTE
+                    // Si idContraparte sigue estando vacío (común en chats de propuestas),
+                    // se toma el ID del emisor que NO es el usuario actual.
+                    var contraparteIdFinal = _uiState.value.idContraparte
+                    if (contraparteIdFinal.isBlank()) {
+                        val contraparteDetectada = listaMensajes.firstOrNull {
+                            it.emisorId.isNotBlank() && it.emisorId != currentUserIdActual
+                        }?.emisorId
+
+                        if (!contraparteDetectada.isNullOrBlank()) {
+                            contraparteIdFinal = contraparteDetectada
+                            cargarDatosContraparte(contraparteDetectada)
+                        }
+                    }
+
                     _uiState.value = _uiState.value.copy(
                         mensajes = listaMensajes,
+                        idContraparte = contraparteIdFinal,
                         isLoading = false
                     )
 
@@ -495,9 +511,6 @@ class ChatViewModel : ViewModel() {
         batch.commit()
     }
 
-    /**
-     * Permite al cliente completar el servicio y calificar al prestador.
-     */
     fun completarServicioYCalificar(
         calificacion: Int,
         comentario: String,
@@ -554,10 +567,6 @@ class ChatViewModel : ViewModel() {
             }
     }
 
-    /**
-     * Permite al prestador calificar al cliente una vez el servicio esté completado.
-     * Guarda en la colección raíz 'resenas' de forma estandarizada y recalcula el promedio del cliente.
-     */
     fun calificarCliente(
         calificacion: Int,
         comentario: String,
