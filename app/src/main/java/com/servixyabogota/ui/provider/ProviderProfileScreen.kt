@@ -28,15 +28,51 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
+import java.util.Locale
+
+// Alias por si lo utilizas con el nombre ProviderProfileScreen en ProviderMainContainer
+@Composable
+fun ProviderProfileScreen(
+    nombre: String = "Carlos Pérez",
+    esVerificado: Boolean = true,
+    rating: String = "0.0",
+    resenasCount: Int = 0,
+    telefonoInicial: String = "",
+    correoInicial: String = "",
+    fotoUrl: String? = null,
+    onIrAZonaCobertura: () -> Unit = {},
+    onIrASeguridad: () -> Unit = {},
+    onIrAResenas: () -> Unit = {},
+    onGuardarCambios: (telefono: String, correo: String) -> Unit = { _, _ -> },
+    onLogout: () -> Unit = {}
+) {
+    PerfilProfesionalScreen(
+        nombre = nombre,
+        esVerificado = esVerificado,
+        rating = rating,
+        resenasCount = resenasCount,
+        telefonoInicial = telefonoInicial,
+        correoInicial = correoInicial,
+        fotoUrl = fotoUrl,
+        onIrAZonaCobertura = onIrAZonaCobertura,
+        onIrASeguridad = onIrASeguridad,
+        onIrAResenas = onIrAResenas,
+        onGuardarCambios = onGuardarCambios,
+        onLogout = onLogout
+    )
+}
 
 @Composable
 fun PerfilProfesionalScreen(
     nombre: String = "Carlos Pérez",
     esVerificado: Boolean = true,
-    rating: String = "4.8",
-    resenasCount: Int = 15,
-    telefonoInicial: String = "+57 310 987 6543",
-    correoInicial: String = "carlos.perez@servix.com",
+    rating: String = "0.0",
+    resenasCount: Int = 0,
+    telefonoInicial: String = "",
+    correoInicial: String = "",
     fotoUrl: String? = null,
     onIrAZonaCobertura: () -> Unit = {},
     onIrASeguridad: () -> Unit = {},
@@ -45,12 +81,98 @@ fun PerfilProfesionalScreen(
     onLogout: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    var telefono by remember(telefonoInicial) { mutableStateOf(telefonoInicial) }
-    var correo by remember(correoInicial) { mutableStateOf(correoInicial) }
+    val orangeColor = Color(0xFFFF8F00)
+
+    val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
+    val db = remember { FirebaseFirestore.getInstance() }
+
+    // Estados reactivos dinámicos
+    var nombreState by remember { mutableStateOf(nombre) }
+    var fotoUrlState by remember { mutableStateOf(fotoUrl) }
+    var esVerificadoState by remember { mutableStateOf(esVerificado) }
+    var ratingState by remember { mutableStateOf(rating) }
+    var resenasCountState by remember { mutableIntStateOf(resenasCount) }
+
+    var telefono by remember { mutableStateOf(telefonoInicial) }
+    var correo by remember { mutableStateOf(correoInicial) }
+    var isSaving by remember { mutableStateOf(false) }
 
     var showLogoutDialog by remember { mutableStateOf(false) }
 
-    val orangeColor = Color(0xFFFF8F00)
+    // Cargar y escuchar datos reales del prestador y sus reseñas en Firestore
+    DisposableEffect(currentUserId) {
+        if (currentUserId.isBlank()) {
+            onDispose { }
+        } else {
+            // 1. Escuchar perfil del usuario en Firestore
+            val listenerUsuario = db.collection("usuarios").document(currentUserId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error == null && snapshot != null && snapshot.exists()) {
+                        nombreState = snapshot.getString("nombreCompleto")
+                            ?: snapshot.getString("nombre")
+                                    ?: nombreState
+
+                        fotoUrlState = snapshot.getString("fotoUrl")
+                            ?: snapshot.getString("fotoPerfilUrl")
+                                    ?: snapshot.getString("foto")
+                                    ?: fotoUrlState
+
+                        val telDoc = snapshot.getString("telefono") ?: ""
+                        if (telDoc.isNotBlank()) telefono = telDoc
+
+                        val mailDoc = snapshot.getString("correo") ?: snapshot.getString("email") ?: ""
+                        if (mailDoc.isNotBlank()) correo = mailDoc
+
+                        esVerificadoState = snapshot.getBoolean("esVerificado")
+                            ?: snapshot.getBoolean("verificado")
+                                    ?: true
+
+                        // Leer calificación previa si existe acumulada
+                        val califNum = (snapshot.get("calificacion") as? Number)?.toDouble()
+                            ?: (snapshot.get("rating") as? Number)?.toDouble()
+                        if (califNum != null && califNum > 0) {
+                            ratingState = String.format(Locale.US, "%.1f", califNum)
+                        }
+
+                        val countNum = (snapshot.get("totalResenas") as? Number)?.toInt()
+                            ?: (snapshot.get("resenasCount") as? Number)?.toInt()
+                        if (countNum != null) {
+                            resenasCountState = countNum
+                        }
+                    }
+                }
+
+            // 2. Escuchar colección de reseñas reales para recalcular el promedio dinámico
+            val listenerResenas = db.collection("resenas")
+                .whereEqualTo("prestadorId", currentUserId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error == null && snapshot != null && !snapshot.isEmpty) {
+                        val total = snapshot.documents.size
+                        var suma = 0.0
+                        var validos = 0
+                        for (doc in snapshot.documents) {
+                            val calif = (doc.get("calificacion") as? Number)?.toDouble()
+                                ?: (doc.get("puntuacion") as? Number)?.toDouble()
+                                ?: (doc.get("estrellas") as? Number)?.toDouble()
+                            if (calif != null) {
+                                suma += calif
+                                validos++
+                            }
+                        }
+                        if (validos > 0) {
+                            val promedio = suma / validos
+                            ratingState = String.format(Locale.US, "%.1f", promedio)
+                            resenasCountState = total
+                        }
+                    }
+                }
+
+            onDispose {
+                listenerUsuario.remove()
+                listenerResenas.remove()
+            }
+        }
+    }
 
     // Diálogo de confirmación para cerrar sesión
     if (showLogoutDialog) {
@@ -106,9 +228,9 @@ fun PerfilProfesionalScreen(
                         .clip(CircleShape)
                         .background(Color(0xFFE5E7EB))
                 ) {
-                    if (!fotoUrl.isNullOrEmpty()) {
+                    if (!fotoUrlState.isNullOrEmpty()) {
                         Image(
-                            painter = rememberAsyncImagePainter(fotoUrl),
+                            painter = rememberAsyncImagePainter(fotoUrlState),
                             contentDescription = "Foto Perfil",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
@@ -144,7 +266,7 @@ fun PerfilProfesionalScreen(
                 ) {
                     Column {
                         Text(
-                            text = nombre.ifBlank { "Carlos Pérez" },
+                            text = nombreState.ifBlank { "Prestador de Servicios" },
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp,
                             color = Color(0xFF111827)
@@ -159,21 +281,21 @@ fun PerfilProfesionalScreen(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = rating,
+                                text = ratingState,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp,
                                 color = orangeColor
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "($resenasCount reseñas)",
+                                text = "($resenasCountState reseñas)",
                                 fontSize = 13.sp,
                                 color = Color.Gray
                             )
                         }
                     }
 
-                    if (esVerificado) {
+                    if (esVerificadoState) {
                         Surface(
                             color = Color(0xFFE8F5E9),
                             shape = RoundedCornerShape(8.dp)
@@ -347,9 +469,30 @@ fun PerfilProfesionalScreen(
 
         // BOTÓN DE GUARDAR
         Button(
+            enabled = !isSaving,
             onClick = {
-                onGuardarCambios(telefono, correo)
-                Toast.makeText(context, "Perfil guardado con éxito", Toast.LENGTH_SHORT).show()
+                if (currentUserId.isNotBlank()) {
+                    isSaving = true
+                    val datosActualizar = mapOf(
+                        "telefono" to telefono,
+                        "correo" to correo,
+                        "email" to correo
+                    )
+                    db.collection("usuarios").document(currentUserId)
+                        .set(datosActualizar, SetOptions.merge())
+                        .addOnSuccessListener {
+                            isSaving = false
+                            onGuardarCambios(telefono, correo)
+                            Toast.makeText(context, "Perfil guardado con éxito", Toast.LENGTH_SHORT).show()
+                        }
+                        .addOnFailureListener {
+                            isSaving = false
+                            Toast.makeText(context, "Error al guardar en servidor", Toast.LENGTH_SHORT).show()
+                        }
+                } else {
+                    onGuardarCambios(telefono, correo)
+                    Toast.makeText(context, "Perfil guardado con éxito", Toast.LENGTH_SHORT).show()
+                }
             },
             colors = ButtonDefaults.buttonColors(containerColor = orangeColor),
             shape = RoundedCornerShape(12.dp),
@@ -357,12 +500,16 @@ fun PerfilProfesionalScreen(
                 .fillMaxWidth()
                 .height(50.dp)
         ) {
-            Text(
-                text = "Guardar Cambios de Perfil",
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
+            if (isSaving) {
+                CircularProgressIndicator(color = Color.White, modifier = Modifier.size(22.dp))
+            } else {
+                Text(
+                    text = "Guardar Cambios de Perfil",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
         }
     }
 }
