@@ -4,6 +4,7 @@ import android.media.MediaPlayer
 import android.widget.MediaController
 import android.widget.Toast
 import android.widget.VideoView
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -19,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
@@ -37,10 +39,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import coil.compose.rememberAsyncImagePainter
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.servixyabogota.data.model.Solicitud
+import java.text.NumberFormat
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 private fun esVideoUrl(url: String): Boolean {
@@ -66,6 +69,8 @@ fun DetalleSolicitudScreen(
     onConfirmarPostulacion: (monto: Double, propuesta: String) -> Unit
 ) {
     val context = LocalContext.current
+    val currentUserId = FirebaseAuth.getInstance().currentUser?.uid ?: ""
+
     var montoTexto by remember { mutableStateOf("") }
     var propuestaTexto by remember { mutableStateOf("") }
     var videoParaReproducir by remember { mutableStateOf<String?>(null) }
@@ -77,12 +82,17 @@ fun DetalleSolicitudScreen(
     var estaCargandoResenas by remember { mutableStateOf(true) }
     var promedioCliente by remember { mutableDoubleStateOf(0.0) }
 
+    // ESTADOS DE VALIDACIÓN DE PROPUESTA PREVIA
+    var yaTienePropuestaActiva by remember { mutableStateOf(false) }
+    var propuestaExistenteMonto by remember { mutableStateOf<Double?>(null) }
+    var propuestaExistenteTexto by remember { mutableStateOf("") }
+    var cargandoEstadoPropuesta by remember { mutableStateOf(true) }
+
     val emoji = obtenerEmoji(solicitud.categoria)
     val esUrgente = solicitud.nivelUrgencia.equals("Urgente", ignoreCase = true)
 
-    // Carga de reseñas dejadas por prestadores al cliente
+    // 1. Carga de reseñas del cliente
     val clienteId = solicitud.clienteId
-
     LaunchedEffect(clienteId) {
         if (clienteId.isNotBlank()) {
             estaCargandoResenas = true
@@ -143,7 +153,68 @@ fun DetalleSolicitudScreen(
         }
     }
 
-    // Validación de estado disponible para ofertar
+    // 2. Escuchar en TIEMPO REAL la ruta exacta donde ProviderViewModel guarda la propuesta:
+    // solicitudes/{solicitudId}/propuestas/{prestadorId}
+    DisposableEffect(solicitud.id, currentUserId) {
+        if (solicitud.id.isBlank() || currentUserId.isBlank()) {
+            cargandoEstadoPropuesta = false
+            onDispose { }
+        } else {
+            cargandoEstadoPropuesta = true
+            val db = FirebaseFirestore.getInstance()
+            val estadosInactivosPropuesta = setOf("RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO")
+
+            val listenerPropuesta = db.collection("solicitudes")
+                .document(solicitud.id)
+                .collection("propuestas")
+                .document(currentUserId)
+                .addSnapshotListener { snapshot, _ ->
+                    if (snapshot != null && snapshot.exists()) {
+                        val estado = snapshot.getString("estado")?.uppercase() ?: "PENDIENTE"
+
+                        if (estado !in estadosInactivosPropuesta) {
+                            yaTienePropuestaActiva = true
+                            propuestaExistenteMonto = snapshot.getDouble("monto") ?: snapshot.getDouble("precioEstimado")
+                            propuestaExistenteTexto = snapshot.getString("mensaje") ?: snapshot.getString("propuesta") ?: ""
+                            cargandoEstadoPropuesta = false
+                            return@addSnapshotListener
+                        }
+                    }
+
+                    // Verificación alternativa por si existe en colección raíz "postulaciones"
+                    db.collection("postulaciones")
+                        .whereEqualTo("solicitudId", solicitud.id)
+                        .whereEqualTo("prestadorId", currentUserId)
+                        .get()
+                        .addOnSuccessListener { snapshotRaiz ->
+                            val docRaiz = snapshotRaiz.documents.firstOrNull { doc ->
+                                val st = doc.getString("estado")?.uppercase() ?: "PENDIENTE"
+                                st !in estadosInactivosPropuesta
+                            }
+                            if (docRaiz != null) {
+                                yaTienePropuestaActiva = true
+                                propuestaExistenteMonto = docRaiz.getDouble("monto") ?: docRaiz.getDouble("precio")
+                                propuestaExistenteTexto = docRaiz.getString("propuesta") ?: docRaiz.getString("mensaje") ?: ""
+                            } else {
+                                yaTienePropuestaActiva = false
+                                propuestaExistenteMonto = null
+                                propuestaExistenteTexto = ""
+                            }
+                            cargandoEstadoPropuesta = false
+                        }
+                        .addOnFailureListener {
+                            yaTienePropuestaActiva = false
+                            cargandoEstadoPropuesta = false
+                        }
+                }
+
+            onDispose {
+                listenerPropuesta.remove()
+            }
+        }
+    }
+
+    // Validación de estado general de la solicitud
     val estadosInactivos = setOf(
         "EN_PROCESO", "COMPLETADA", "COMPLETADO",
         "FINALIZADA", "FINALIZADO", "CANCELADA", "CANCELADO"
@@ -206,7 +277,8 @@ fun DetalleSolicitudScreen(
             }
         },
         bottomBar = {
-            if (puedePostularse) {
+            // Solo se muestra el botón si la solicitud admite postulación Y NO tiene una propuesta activa enviada
+            if (puedePostularse && !yaTienePropuestaActiva && !cargandoEstadoPropuesta) {
                 Surface(
                     color = Color.White,
                     shadowElevation = 8.dp,
@@ -259,7 +331,7 @@ fun DetalleSolicitudScreen(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1F5F9)),
+                border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -317,7 +389,7 @@ fun DetalleSolicitudScreen(
                         }
                     }
 
-                    // CHIP DE RATING CLICKEABLE CON PROMEDIO DINÁMICO
+                    // CHIP DE RATING CLICKEABLE
                     Surface(
                         color = Color(0xFFFFF8E1),
                         shape = RoundedCornerShape(20.dp),
@@ -357,7 +429,7 @@ fun DetalleSolicitudScreen(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1F5F9)),
+                border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -450,7 +522,7 @@ fun DetalleSolicitudScreen(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White),
                     elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1F5F9)),
+                    border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -519,13 +591,131 @@ fun DetalleSolicitudScreen(
                 }
             }
 
-            // 4. PROPUESTA O BANNER DE ESTADO INACTIVO
-            if (puedePostularse) {
+            // 4. PROPUESTA, BLOQUEO DE PROPUESTA ACTIVA O BANNER DE ESTADO INACTIVO
+            if (!puedePostularse) {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Box(
+                        modifier = Modifier.padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Esta solicitud se encuentra en estado '${solicitud.estado.uppercase()}' y ya no admite nuevas propuestas.",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+                }
+            } else if (cargandoEstadoPropuesta) {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            color = Color(0xFFFF8F00),
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                }
+            } else if (yaTienePropuestaActiva) {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)),
+                    border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = Color(0xFFD97706),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = "Propuesta Ya Enviada",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF92400E)
+                                )
+                            }
+                            Surface(
+                                color = Color(0xFFFEF3C7),
+                                shape = RoundedCornerShape(20.dp)
+                            ) {
+                                Text(
+                                    text = "En espera",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFB45309),
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        HorizontalDivider(color = Color(0xFFFCD34D).copy(alpha = 0.5f), thickness = 1.dp)
+
+                        if (propuestaExistenteMonto != null) {
+                            val format = NumberFormat.getCurrencyInstance(Locale("es", "CO")).apply {
+                                maximumFractionDigits = 0
+                            }
+                            Text(
+                                text = "Valor enviado: ${format.format(propuestaExistenteMonto)}",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                        }
+
+                        if (propuestaExistenteTexto.isNotBlank()) {
+                            Text(
+                                text = "\"$propuestaExistenteTexto\"",
+                                fontSize = 13.sp,
+                                color = Color(0xFF475569)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(2.dp))
+
+                        Text(
+                            text = "ℹ️ Ya enviaste una propuesta para esta solicitud. Solo podrás enviar una nueva propuesta dentro del chat si el cliente rechaza o cancela la oferta actual.",
+                            fontSize = 12.sp,
+                            color = Color(0xFFB45309),
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+            } else {
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White),
                     elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF1F5F9)),
+                    border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -576,25 +766,6 @@ fun DetalleSolicitudScreen(
                                 focusedContainerColor = Color(0xFFF8FAFC),
                                 unfocusedContainerColor = Color(0xFFF8FAFC)
                             )
-                        )
-                    }
-                }
-            } else {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Box(
-                        modifier = Modifier.padding(16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Esta solicitud se encuentra en estado '${solicitud.estado.uppercase()}' y ya no admite nuevas propuestas.",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFF64748B)
                         )
                     }
                 }
@@ -745,7 +916,7 @@ private fun ClienteResenasDialog(
                             Card(
                                 shape = RoundedCornerShape(12.dp),
                                 colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(modifier = Modifier.padding(12.dp)) {
