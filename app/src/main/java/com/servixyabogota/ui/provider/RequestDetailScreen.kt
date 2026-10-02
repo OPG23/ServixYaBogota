@@ -9,6 +9,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,18 +31,33 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import coil.compose.rememberAsyncImagePainter
+import com.google.firebase.firestore.FirebaseFirestore
 import com.servixyabogota.data.model.Solicitud
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private fun esVideoUrl(url: String): Boolean {
     val lower = url.lowercase()
     return lower.contains(".mp4") || lower.contains(".mov") || lower.contains(".mkv") ||
             lower.contains(".webm") || lower.contains(".avi") || lower.contains("video")
 }
+
+// Modelo local para las reseñas del cliente recibidas desde otros prestadores
+data class ReviewClienteItem(
+    val id: String = "",
+    val autorNombre: String = "Prestador ServixYa",
+    val autorFotoUrl: String = "",
+    val calificacion: Int = 5,
+    val comentario: String = "",
+    val fechaFormateada: String = "Reciente"
+)
 
 @Composable
 fun DetalleSolicitudScreen(
@@ -54,8 +71,77 @@ fun DetalleSolicitudScreen(
     var videoParaReproducir by remember { mutableStateOf<String?>(null) }
     var imagenParaVer by remember { mutableStateOf<String?>(null) }
 
+    // ESTADOS PARA RESEÑAS Y REPUTACIÓN DEL CLIENTE
+    var mostrarModalResenas by remember { mutableStateOf(false) }
+    var listaResenasCliente by remember { mutableStateOf<List<ReviewClienteItem>>(emptyList()) }
+    var estaCargandoResenas by remember { mutableStateOf(true) }
+    var promedioCliente by remember { mutableDoubleStateOf(0.0) }
+
     val emoji = obtenerEmoji(solicitud.categoria)
     val esUrgente = solicitud.nivelUrgencia.equals("Urgente", ignoreCase = true)
+
+    // Carga de reseñas dejadas por prestadores al cliente
+    val clienteId = solicitud.clienteId
+
+    LaunchedEffect(clienteId) {
+        if (clienteId.isNotBlank()) {
+            estaCargandoResenas = true
+            val db = FirebaseFirestore.getInstance()
+
+            db.collection("resenas")
+                .whereEqualTo("destinatarioId", clienteId)
+                .get()
+                .addOnSuccessListener { snapshot1 ->
+                    db.collection("resenas")
+                        .whereEqualTo("clienteId", clienteId)
+                        .get()
+                        .addOnSuccessListener { snapshot2 ->
+                            val docsUnicos = (snapshot1.documents + snapshot2.documents)
+                                .distinctBy { it.id }
+                                .filter { doc ->
+                                    val tipo = doc.getString("tipo")
+                                    tipo == "PRESTADOR_A_CLIENTE" || doc.getString("destinatarioId") == clienteId
+                                }
+
+                            val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                            val resenasTemp = docsUnicos.map { doc ->
+                                val timestamp = doc.getTimestamp("fecha")
+                                val fechaObj = timestamp?.toDate()
+                                val calif = doc.getLong("calificacion")?.toInt() ?: 5
+
+                                ReviewClienteItem(
+                                    id = doc.id,
+                                    autorNombre = doc.getString("autorNombre")
+                                        ?: doc.getString("prestadorNombre")
+                                        ?: "Prestador ServixYa",
+                                    autorFotoUrl = doc.getString("autorFotoUrl")
+                                        ?: doc.getString("prestadorFotoUrl")
+                                        ?: "",
+                                    calificacion = calif,
+                                    comentario = doc.getString("comentario") ?: "",
+                                    fechaFormateada = if (fechaObj != null) sdf.format(fechaObj) else "Reciente"
+                                )
+                            }
+
+                            listaResenasCliente = resenasTemp
+                            promedioCliente = if (resenasTemp.isNotEmpty()) {
+                                resenasTemp.map { it.calificacion }.average()
+                            } else {
+                                0.0
+                            }
+                            estaCargandoResenas = false
+                        }
+                        .addOnFailureListener {
+                            estaCargandoResenas = false
+                        }
+                }
+                .addOnFailureListener {
+                    estaCargandoResenas = false
+                }
+        } else {
+            estaCargandoResenas = false
+        }
+    }
 
     // Validación de estado disponible para ofertar
     val estadosInactivos = setOf(
@@ -64,7 +150,17 @@ fun DetalleSolicitudScreen(
     )
     val puedePostularse = solicitud.estado.uppercase() !in estadosInactivos
 
-    // MODALES DE MULTIMEDIA CON NOMBRES ÚNICOS
+    // MODALES
+    if (mostrarModalResenas) {
+        ClienteResenasDialog(
+            clienteNombre = solicitud.clienteNombre.ifBlank { "Cliente ServixYa" },
+            promedio = promedioCliente,
+            resenas = listaResenasCliente,
+            estaCargando = estaCargandoResenas,
+            onDismiss = { mostrarModalResenas = false }
+        )
+    }
+
     videoParaReproducir?.let { videoUrl ->
         SolicitudVideoPlayerDialog(
             videoUrl = videoUrl,
@@ -221,22 +317,37 @@ fun DetalleSolicitudScreen(
                         }
                     }
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    // CHIP DE RATING CLICKEABLE CON PROMEDIO DINÁMICO
+                    Surface(
+                        color = Color(0xFFFFF8E1),
+                        shape = RoundedCornerShape(20.dp),
+                        modifier = Modifier.clickable { mostrarModalResenas = true }
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Star,
-                            contentDescription = null,
-                            tint = Color(0xFFFFB800),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "4.9",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = "Ver Reseñas",
+                                tint = Color(0xFFFFB800),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = if (promedioCliente > 0.0) String.format(Locale.US, "%.1f", promedioCliente) else if (estaCargandoResenas) "..." else "S/C",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFB45309)
+                            )
+                            if (listaResenasCliente.isNotEmpty()) {
+                                Text(
+                                    text = "(${listaResenasCliente.size})",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFFB45309).copy(alpha = 0.8f)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -485,6 +596,239 @@ fun DetalleSolicitudScreen(
                             fontWeight = FontWeight.Medium,
                             color = Color(0xFF64748B)
                         )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// DIÁLOGO DE CALIFICACIONES Y OPINIONES DEL CLIENTE
+@Composable
+private fun ClienteResenasDialog(
+    clienteNombre: String,
+    promedio: Double,
+    resenas: List<ReviewClienteItem>,
+    estaCargando: Boolean,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp)
+                .heightIn(max = 520.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Reputación del Cliente",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF0F172A)
+                        )
+                        Text(
+                            text = clienteNombre,
+                            fontSize = 13.sp,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .background(Color(0xFFF1F5F9), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Cerrar",
+                            tint = Color(0xFF64748B),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Surface(
+                    color = Color(0xFFFFF8E1),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Star,
+                            contentDescription = null,
+                            tint = Color(0xFFFFB800),
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (promedio > 0.0) String.format(Locale.US, "%.1f / 5.0", promedio) else "Sin promedio",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFB45309)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "(${resenas.size} opiniones)",
+                            fontSize = 12.sp,
+                            color = Color(0xFFB45309).copy(alpha = 0.8f)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (estaCargando) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(150.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = Color(0xFFFF8F00))
+                    }
+                } else if (resenas.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "💬",
+                                fontSize = 32.sp
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Aún no hay opiniones sobre este cliente",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF475569),
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Sé el primero en calificarlo al completar un servicio.",
+                                fontSize = 12.sp,
+                                color = Color(0xFF94A3B8),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(resenas, key = { it.id }) { resena ->
+                            Card(
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Surface(
+                                                modifier = Modifier.size(32.dp),
+                                                shape = CircleShape,
+                                                color = Color(0xFFE2E8F0)
+                                            ) {
+                                                if (resena.autorFotoUrl.isNotBlank()) {
+                                                    Image(
+                                                        painter = rememberAsyncImagePainter(model = resena.autorFotoUrl),
+                                                        contentDescription = null,
+                                                        contentScale = ContentScale.Crop,
+                                                        modifier = Modifier.fillMaxSize()
+                                                    )
+                                                } else {
+                                                    Box(
+                                                        contentAlignment = Alignment.Center,
+                                                        modifier = Modifier.fillMaxSize()
+                                                    ) {
+                                                        Text(
+                                                            text = resena.autorNombre.take(1).uppercase(),
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 13.sp,
+                                                            color = Color(0xFF475569)
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            Text(
+                                                text = resena.autorNombre,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF0F172A)
+                                            )
+                                        }
+
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Default.Star,
+                                                contentDescription = null,
+                                                tint = Color(0xFFFFB800),
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(2.dp))
+                                            Text(
+                                                text = resena.calificacion.toString(),
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF0F172A)
+                                            )
+                                        }
+                                    }
+
+                                    if (resena.comentario.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = resena.comentario,
+                                            fontSize = 12.sp,
+                                            color = Color(0xFF334155),
+                                            lineHeight = 16.sp
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = resena.fechaFormateada,
+                                        fontSize = 10.sp,
+                                        color = Color(0xFF94A3B8)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
