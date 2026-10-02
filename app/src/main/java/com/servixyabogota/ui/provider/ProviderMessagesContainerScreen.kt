@@ -1,5 +1,6 @@
 package com.servixyabogota.ui.provider
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -17,10 +18,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.rememberAsyncImagePainter
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
@@ -32,11 +35,35 @@ import java.util.Locale
 data class ChatItemUi(
     val id: String,
     val nombreCliente: String,
+    val fotoCliente: String = "",
     val ultimoMensaje: String,
     val hora: String,
     val noLeidos: Int = 0,
     val tituloSolicitud: String? = null
 )
+
+// Helper para asignar emojis por categoría de servicio
+private fun obtenerEmojiCategoria(categoria: String?): String {
+    if (categoria.isNullOrBlank()) return "🛠️"
+    val cat = categoria.lowercase()
+    return when {
+        cat.contains("plomer") || cat.contains("tuber") -> "🚰"
+        cat.contains("pintur") -> "🎨"
+        cat.contains("carpint") -> "🪵"
+        cat.contains("electr") -> "⚡"
+        cat.contains("limpiez") || cat.contains("aseo") -> "🧹"
+        cat.contains("jardin") -> "🌱"
+        cat.contains("cerraj") -> "🔑"
+        cat.contains("mecanic") || cat.contains("auto") -> "🚗"
+        cat.contains("flete") || cat.contains("mudanz") -> "🚚"
+        cat.contains("aire") || cat.contains("acondic") -> "❄️"
+        cat.contains("techo") || cat.contains("imperm") -> "🏠"
+        cat.contains("gas") -> "🔥"
+        cat.contains("electrodom") || cat.contains("lavadora") -> "🧺"
+        cat.contains("remodel") || cat.contains("construc") -> "🏗️"
+        else -> "🛠️"
+    }
+}
 
 @Composable
 fun ProviderMessagesContainerScreen(
@@ -170,10 +197,16 @@ fun ProviderMessagesContainerScreen(
                                             ?: clientDoc.getString("nombre")
                                             ?: "Cliente Directo"
 
+                                        val fotoCliente = clientDoc.getString("fotoUrl")
+                                            ?: clientDoc.getString("fotoPerfilUrl")
+                                            ?: clientDoc.getString("foto")
+                                            ?: ""
+
                                         listaTemp.add(
                                             ChatItemUi(
                                                 id = chatId,
                                                 nombreCliente = nombreCliente,
+                                                fotoCliente = fotoCliente,
                                                 ultimoMensaje = ultimoMsg,
                                                 hora = horaFormateada,
                                                 noLeidos = 0,
@@ -316,10 +349,13 @@ private fun cargarDetallesSolicitudes(
         val ultimoMsg = doc.getString("ultimoMensaje") ?: "Solicitud iniciada"
         val timestamp = doc.getTimestamp("fechaUltimoMensaje")
         val horaFormateada = formatearFecha(timestamp)
-        val tituloServicio = doc.getString("categoria")
+        val categoriaRaw = doc.getString("categoria")
             ?: doc.getString("servicio")
             ?: doc.getString("titulo")
             ?: "Solicitud de Servicio"
+
+        val emoji = obtenerEmojiCategoria(categoriaRaw)
+        val tituloServicio = "$emoji $categoriaRaw"
 
         if (clienteId.isNotBlank()) {
             db.collection("usuarios").document(clienteId).get()
@@ -328,10 +364,16 @@ private fun cargarDetallesSolicitudes(
                         ?: clientDoc.getString("nombre")
                         ?: "Cliente"
 
+                    val fotoCliente = clientDoc.getString("fotoUrl")
+                        ?: clientDoc.getString("fotoPerfilUrl")
+                        ?: clientDoc.getString("foto")
+                        ?: ""
+
                     listaTemp.add(
                         ChatItemUi(
                             id = chatId,
                             nombreCliente = nombreCliente,
+                            fotoCliente = fotoCliente,
                             ultimoMensaje = ultimoMsg,
                             hora = horaFormateada,
                             noLeidos = 0,
@@ -392,19 +434,39 @@ private fun ChatListItem(
             modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Contenedor de Foto de Perfil o Icono por defecto
             Box(
                 modifier = Modifier
-                    .size(46.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .background(if (chat.tituloSolicitud != null) Color(0xFFFFF3E0) else Color(0xFFE3F2FD)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = if (chat.tituloSolicitud != null) Icons.Default.Assignment else Icons.Default.Person,
-                    contentDescription = null,
-                    tint = if (chat.tituloSolicitud != null) Color(0xFFFF8F00) else Color(0xFF1976D2),
-                    modifier = Modifier.size(24.dp)
-                )
+                if (chat.fotoCliente.isNotBlank()) {
+                    Image(
+                        painter = rememberAsyncImagePainter(model = chat.fotoCliente),
+                        contentDescription = "Foto de ${chat.nombreCliente}",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    val inicial = chat.nombreCliente.trim().take(1).uppercase()
+                    if (inicial.isNotBlank() && inicial[0].isLetter()) {
+                        Text(
+                            text = inicial,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = if (chat.tituloSolicitud != null) Color(0xFFFF8F00) else Color(0xFF1976D2)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = if (chat.tituloSolicitud != null) Icons.Default.Assignment else Icons.Default.Person,
+                            contentDescription = null,
+                            tint = if (chat.tituloSolicitud != null) Color(0xFFFF8F00) else Color(0xFF1976D2),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.width(12.dp))
@@ -413,7 +475,7 @@ private fun ChatListItem(
                 if (chat.tituloSolicitud != null) {
                     Text(
                         text = chat.tituloSolicitud,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFFFF8F00),
                         maxLines = 1,
