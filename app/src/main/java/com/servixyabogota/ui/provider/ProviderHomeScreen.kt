@@ -457,13 +457,12 @@ fun ProviderNonApprovedScreen(
 }
 
 @Composable
-fun HistorialTrabajosScreen() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Text("No tienes trabajos completados aún", color = Color.Gray, fontSize = 14.sp)
-    }
+fun HistorialTrabajosScreen(
+    onOpenChat: (trabajoId: String, chatId: String) -> Unit = { _, _ -> }
+) {
+    ProviderHistoryScreen(
+        onOpenChat = onOpenChat
+    )
 }
 
 @Composable
