@@ -458,10 +458,58 @@ fun ProviderNonApprovedScreen(
 
 @Composable
 fun HistorialTrabajosScreen(
-    onOpenChat: (trabajoId: String, chatId: String) -> Unit = { _, _ -> }
+    onVerDetalleSolicitud: (String) -> Unit = {},
+    onOpenChat: (solicitudId: String, clienteId: String) -> Unit = { _, _ -> }
 ) {
+    // Datos de prueba con la misma estructura del screenshot
+    val trabajosActivos = listOf(
+        TrabajoItemUI(
+            id = "1",
+            clienteId = "cli_123",
+            clienteNombre = "Laura Gómez",
+            titulo = "Arreglo Fuga Lavamanos",
+            localidad = "Usaquén",
+            direccion = "Sector Calle 127",
+            estado = "ACEPTADO",
+            fecha = "Hoy"
+        )
+    )
+
+    val historialReciente = listOf(
+        TrabajoItemUI(
+            id = "2",
+            clienteNombre = "Cliente",
+            titulo = "Cambio de Grifería",
+            localidad = "Suba",
+            estado = "COMPLETADO",
+            fecha = "12/08/2026",
+            calificacion = 5.0f
+        ),
+        TrabajoItemUI(
+            id = "3",
+            clienteNombre = "Cliente",
+            titulo = "Mantenimiento Calentador",
+            localidad = "Chapinero",
+            estado = "POSTULADO",
+            fecha = "10/08/2026",
+            subtituloEstado = "En espera de selección"
+        ),
+        TrabajoItemUI(
+            id = "4",
+            clienteNombre = "Cliente",
+            titulo = "Instalación Lavadora",
+            localidad = "Engativá",
+            estado = "COMPLETADO",
+            fecha = "05/08/2026",
+            calificacion = 4.8f
+        )
+    )
+
     ProviderHistoryScreen(
-        onOpenChat = onOpenChat
+        trabajosActivos = trabajosActivos,
+        historialReciente = historialReciente,
+        onVerDetalleSolicitud = onVerDetalleSolicitud,
+        onAbrirChatCliente = onOpenChat
     )
 }
 
