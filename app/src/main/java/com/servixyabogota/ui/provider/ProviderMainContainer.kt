@@ -41,10 +41,10 @@ fun ProviderMainContainer(
     val uiStateState = viewModel.uiState.observeAsState(EstadoProveedorUiState())
     val uiState = uiStateState.value ?: EstadoProveedorUiState()
 
-    // Obtenemos la lista en vivo de solicitudes según las categorías y localidades del prestador
+    // Obtenemos la lista en vivo de TODAS las solicitudes disponibles en sus categorías (sin filtrar por localidad aquí)
     val solicitudesDisponibles by viewModel.getSolicitudesDisponibles(
         misCategorias = uiState.categorias,
-        misLocalidades = uiState.localidades
+        misLocalidades = emptyList() // Se envía vacía para no restringir la consulta base
     ).collectAsState(initial = emptyList())
 
     // NAVEGACIÓN PRINCIPAL
@@ -155,12 +155,12 @@ fun ProviderMainContainer(
                         solicitudSeleccionada = localFound
                         activeChat = null // Cerramos el chat para mostrar el detalle
                     } else {
-                        // 2. Si pasó a EN_PROCESO y ya no está disponible públicamente,
-                        // la traemos directamente desde Firestore usando su ID.
+                        // 2. Si la solicitud cambió de estado (ej: EN_PROCESO) o no está en el catálogo activo,
+                        // la consultamos directamente a Firestore por su ID
                         viewModel.obtenerSolicitudPorId(currentChat.id) { solicitudCargada ->
                             if (solicitudCargada != null) {
                                 solicitudSeleccionada = solicitudCargada
-                                activeChat = null // Cerramos el chat para abrir la solicitud completa
+                                activeChat = null
                             } else {
                                 Toast.makeText(
                                     context,
@@ -179,7 +179,6 @@ fun ProviderMainContainer(
 
     // 2. SI EL PRESTADOR ESTÁ APROBADO: Muestra la App Principal
     else if (uiState.estadoVerificacion == "APROBADO") {
-        // Sub-pantalla de Detalle de Solicitud (al pulsar postularme)
         if (solicitudSeleccionada != null) {
             DetalleSolicitudScreen(
                 solicitud = solicitudSeleccionada!!,
@@ -191,7 +190,7 @@ fun ProviderMainContainer(
                         mensajePresentacion = propuesta,
                         onSuccess = {
                             Toast.makeText(context, "¡Postulación enviada con éxito!", Toast.LENGTH_SHORT).show()
-                            solicitudSeleccionada = null // Cierra el detalle y vuelve al listado
+                            solicitudSeleccionada = null
                         },
                         onError = { mensajeError ->
                             Toast.makeText(context, mensajeError, Toast.LENGTH_LONG).show()
