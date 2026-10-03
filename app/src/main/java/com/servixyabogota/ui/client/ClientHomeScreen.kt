@@ -36,6 +36,8 @@ fun ClientHomeScreen(
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var categoriaSeleccionada by remember { mutableStateOf("") }
+    // Estado para controlar el ordenamiento por calificación
+    var ordenarPorCalificacion by remember { mutableStateOf(false) }
 
     // Obtenemos los prestadores reales desde el ViewModel
     val listaPrestadores = viewModel.listaPrestadores
@@ -54,9 +56,14 @@ fun ClientHomeScreen(
         )
     }
 
-    // FILTRADO DINÁMICO POR CATEGORÍA Y BÚSQUEDA
-    val prestadoresFiltrados = remember(listaPrestadores, categoriaSeleccionada, searchQuery) {
-        listaPrestadores.filter { prestador ->
+    // FILTRADO Y ORDENAMIENTO DINÁMICO
+    val prestadoresFiltrados = remember(
+        listaPrestadores,
+        categoriaSeleccionada,
+        searchQuery,
+        ordenarPorCalificacion
+    ) {
+        val filtrados = listaPrestadores.filter { prestador ->
             val coincideCategoria = categoriaSeleccionada.isEmpty() ||
                     prestador.categorias.any { cat -> cat.contains(categoriaSeleccionada, ignoreCase = true) }
             val coincideBusqueda = searchQuery.isEmpty() ||
@@ -64,6 +71,12 @@ fun ClientHomeScreen(
                     prestador.categorias.any { cat -> cat.contains(searchQuery, ignoreCase = true) }
 
             coincideCategoria && coincideBusqueda
+        }
+
+        if (ordenarPorCalificacion) {
+            filtrados.sortedByDescending { it.calificacion }
+        } else {
+            filtrados
         }
     }
 
@@ -198,7 +211,7 @@ fun ClientHomeScreen(
                 }
             }
 
-            // 4. TÍTULO SECCIÓN Y RESULTADOS
+            // 4. TÍTULO SECCIÓN Y BARRAS DE FILTRO / RESULTADOS
             item {
                 Row(
                     modifier = Modifier
@@ -207,20 +220,56 @@ fun ClientHomeScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = if (categoriaSeleccionada.isBlank()) "Todos los profesionales" else "Especialistas en $categoriaSeleccionada",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (categoriaSeleccionada.isBlank()) "Todos los profesionales" else "Especialistas en $categoriaSeleccionada",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF0F172A),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "${prestadoresFiltrados.size} disponibles",
+                            fontSize = 12.sp,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "${prestadoresFiltrados.size} disponibles",
-                        fontSize = 12.sp,
-                        color = Color(0xFF64748B)
+
+                    // Chip de filtro por mejor calificación
+                    FilterChip(
+                        selected = ordenarPorCalificacion,
+                        onClick = { ordenarPorCalificacion = !ordenarPorCalificacion },
+                        label = {
+                            Text(
+                                text = "Mejor valorados",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = null,
+                                tint = if (ordenarPorCalificacion) Color(0xFFD97706) else Color(0xFF64748B),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFFFEF3C7),
+                            selectedLabelColor = Color(0xFF92400E),
+                            containerColor = Color.White,
+                            labelColor = Color(0xFF475569)
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            borderColor = Color(0xFFE2E8F0),
+                            selectedBorderColor = Color(0xFFF59E0B),
+                            enabled = true,
+                            selected = ordenarPorCalificacion
+                        )
                     )
                 }
             }
