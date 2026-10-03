@@ -21,7 +21,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// Modelo de datos liviano para la vista de historial
 data class TrabajoItemUI(
     val id: String,
     val clienteId: String = "",
@@ -29,7 +28,7 @@ data class TrabajoItemUI(
     val titulo: String,
     val localidad: String,
     val direccion: String = "",
-    val estado: String, // "ACEPTADO", "COMPLETADO", "POSTULADO", "RECHAZADO"
+    val estado: String,
     val fecha: String,
     val calificacion: Float? = null,
     val subtituloEstado: String? = null
@@ -37,14 +36,26 @@ data class TrabajoItemUI(
 
 @Composable
 fun ProviderHistoryScreen(
-    trabajosActivos: List<TrabajoItemUI> = emptyList(),
-    historialReciente: List<TrabajoItemUI> = emptyList(),
+    trabajosActivos: List<TrabajoItemUI>,
+    historialReciente: List<TrabajoItemUI>,
+    estaCargando: Boolean = false,
     onVerDetalleSolicitud: (String) -> Unit = {},
     onAbrirChatCliente: (solicitudId: String, clienteId: String) -> Unit = { _, _ -> }
 ) {
     var tabSeleccionada by remember { mutableIntStateOf(0) }
 
-    // Solo un LazyColumn para evitar crash por scroll anidado
+    if (estaCargando && trabajosActivos.isEmpty() && historialReciente.isEmpty()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFFF8F9FA)),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator(color = Color(0xFFFF8F00))
+        }
+        return
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -88,7 +99,6 @@ fun ProviderHistoryScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Selector de Pestañas
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -216,7 +226,7 @@ fun ProviderHistoryScreen(
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(
-                        text = "Aún no tienes historial de trabajos.",
+                        text = "Aún no tienes historial de postulaciones o trabajos.",
                         fontSize = 13.sp,
                         color = Color.Gray,
                         modifier = Modifier.padding(16.dp)
@@ -237,7 +247,6 @@ fun ProviderHistoryScreen(
     }
 }
 
-// Tarjeta para Trabajos Activos (Borde verde a la izquierda)
 @Composable
 private fun TrabajoActualCard(
     trabajo: TrabajoItemUI,
@@ -254,7 +263,6 @@ private fun TrabajoActualCard(
             .clickable { onVerDetalle() }
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
-            // Franja lateral verde del diseño
             Box(
                 modifier = Modifier
                     .width(4.dp)
@@ -312,7 +320,9 @@ private fun TrabajoActualCard(
                     text = trabajo.titulo,
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp,
-                    color = Color(0xFF111827)
+                    color = Color(0xFF111827),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
 
                 Spacer(modifier = Modifier.height(4.dp))
@@ -352,7 +362,6 @@ private fun TrabajoActualCard(
     }
 }
 
-// Tarjeta del Historial Reciente
 @Composable
 private fun TrabajoHistorialCard(
     trabajo: TrabajoItemUI,

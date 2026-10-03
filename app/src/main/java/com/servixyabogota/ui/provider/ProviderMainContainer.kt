@@ -41,10 +41,10 @@ fun ProviderMainContainer(
     val uiStateState = viewModel.uiState.observeAsState(EstadoProveedorUiState())
     val uiState = uiStateState.value ?: EstadoProveedorUiState()
 
-    // Obtenemos la lista en vivo de TODAS las solicitudes disponibles en sus categorías (sin filtrar por localidad aquí)
+    // Obtenemos la lista en vivo de TODAS las solicitudes disponibles en sus categorías
     val solicitudesDisponibles by viewModel.getSolicitudesDisponibles(
         misCategorias = uiState.categorias,
-        misLocalidades = emptyList() // Se envía vacía para no restringir la consulta base
+        misLocalidades = emptyList()
     ).collectAsState(initial = emptyList())
 
     // NAVEGACIÓN PRINCIPAL
@@ -148,15 +148,12 @@ fun ProviderMainContainer(
             solicitudInfo = currentChat.tituloSolicitud,
             onVerSolicitudClick = if (!currentChat.tituloSolicitud.isNullOrEmpty()) {
                 {
-                    // 1. Intentamos buscarla primero en la lista local disponible
                     val localFound = solicitudesDisponibles.find { it.id == currentChat.id }
 
                     if (localFound != null) {
                         solicitudSeleccionada = localFound
-                        activeChat = null // Cerramos el chat para mostrar el detalle
+                        activeChat = null
                     } else {
-                        // 2. Si la solicitud cambió de estado (ej: EN_PROCESO) o no está en el catálogo activo,
-                        // la consultamos directamente a Firestore por su ID
                         viewModel.obtenerSolicitudPorId(currentChat.id) { solicitudCargada ->
                             if (solicitudCargada != null) {
                                 solicitudSeleccionada = solicitudCargada
@@ -278,7 +275,33 @@ fun ProviderMainContainer(
                                 activeChat = chat
                             }
                         )
-                        2 -> HistorialTrabajosScreen()
+                        2 -> ProviderHistoryScreen(
+                            trabajosActivos = viewModel.listaMisTrabajosActivos,
+                            historialReciente = viewModel.listaHistorialTrabajos,
+                            estaCargando = viewModel.estaCargandoMisTrabajos,
+                            onVerDetalleSolicitud = { idSolicitud ->
+                                viewModel.obtenerSolicitudPorId(idSolicitud) { solicitudCargada ->
+                                    if (solicitudCargada != null) {
+                                        solicitudSeleccionada = solicitudCargada
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            "No se encontró la información del trabajo.",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            },
+                            onAbrirChatCliente = { solicitudId, _ ->
+                                activeChat = ChatItemUi(
+                                    id = solicitudId,
+                                    nombreCliente = "Cliente",
+                                    tituloSolicitud = "Detalles del servicio",
+                                    ultimoMensaje = "",
+                                    hora = ""
+                                )
+                            }
+                        )
                         3 -> {
                             when (subPantallaPerfil) {
                                 "PERFIL" -> {

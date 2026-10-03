@@ -804,4 +804,133 @@ class ProviderViewModel : ViewModel() {
                 onResult(null)
             }
     }
+
+    // --- ESTADO DE MIS TRABAJOS Y POSTULACIONES REALES ---
+    var listaMisTrabajosActivos by mutableStateOf<List<TrabajoItemUI>>(emptyList())
+        private set
+    var listaHistorialTrabajos by mutableStateOf<List<TrabajoItemUI>>(emptyList())
+        private set
+    var estaCargandoMisTrabajos by mutableStateOf(false)
+        private set
+
+    init {
+        cargarPerfil()
+        escucharChatsDirectos()
+        escucharResenas()
+        escucharMisTrabajos() // <--- Se agrega la escucha de trabajos al iniciar
+    }
+
+    /**
+     * Escucha en tiempo real las solicitudes asignadas y postuladas del prestador autenticado
+     */
+    fun escucharMisTrabajos() {
+        val uid = auth.currentUser?.uid ?: return
+        estaCargandoMisTrabajos = true
+
+        val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+
+        // 1. Listener de Solicitudes Asignadas directamente a este prestador
+        db.collection("solicitudes")
+            .whereEqualTo("prestadorIdAsignado", uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    estaCargandoMisTrabajos = false
+                    return@addSnapshotListener
+                }
+
+                val activos = mutableListOf<TrabajoItemUI>()
+                val historial = mutableListOf<TrabajoItemUI>()
+
+                snapshot?.documents?.forEach { doc ->
+                    val solicitud = doc.toObject(Solicitud::class.java)?.copy(id = doc.id) ?: return@forEach
+                    val fechaFormateada = solicitud.fechaCreacion?.let { sdf.format(it) } ?: "Reciente"
+
+                    val item = TrabajoItemUI(
+                        id = solicitud.id,
+                        clienteId = solicitud.clienteId,
+                        clienteNombre = solicitud.clienteNombre.ifBlank { "Cliente ServixYa" },
+                        titulo = solicitud.detalleProblema.ifBlank { solicitud.categoria },
+                        localidad = solicitud.localidad,
+                        direccion = solicitud.direccion,
+                        estado = if (solicitud.estado == "EN_PROCESO") "ACEPTADO" else solicitud.estado,
+                        fecha = fechaFormateada,
+                        subtituloEstado = if (solicitud.estado == "COMPLETADO") "Trabajo completado" else null
+                    )
+
+                    if (solicitud.estado == "EN_PROCESO" || solicitud.estado == "ACEPTADA") {
+                        activos.add(item)
+                    } else {
+                        historial.add(item)
+                    }
+                }
+
+                // 2. Consulta adicional para solicitudes donde se postuló (collectionGroup en 'propuestas')
+                db.collectionGroup("propuestas")
+                    .whereEqualTo("prestadorId", uid)
+                    .addSnapshotListener { propSnapshot, _ ->
+                        val idsAsignados = snapshot?.documents?.map { it.id }?.toSet() ?: emptySet()
+
+                        if (propSnapshot == null || propSnapshot.isEmpty) {
+                            listaMisTrabajosActivos = activos
+                            listaHistorialTrabajos = historial
+                            estaCargandoMisTrabajos = false
+                            return@addSnapshotListener
+                        }
+
+                        var pendientes = propSnapshot.documents.size
+                        val postulacionesTemp = mutableListOf<TrabajoItemUI>()
+
+                        for (pDoc in propSnapshot.documents) {
+                            val solicitudId = pDoc.reference.parent.parent?.id ?: ""
+                            val estadoPropuesta = pDoc.getString("estado") ?: "PENDIENTE"
+
+                            // Si la solicitud ya fue tomada arriba como asignada, la ignoramos para no duplicarla
+                            if (solicitudId.isBlank() || idsAsignados.contains(solicitudId)) {
+                                pendientes--
+                                if (pendientes == 0) {
+                                    listaMisTrabajosActivos = activos
+                                    listaHistorialTrabajos = (historial + postulacionesTemp).distinctBy { it.id }
+                                    estaCargandoMisTrabajos = false
+                                }
+                                continue
+                            }
+
+                            db.collection("solicitudes").document(solicitudId).get()
+                                .addOnSuccessListener { sDoc ->
+                                    val sol = sDoc.toObject(Solicitud::class.java)?.copy(id = sDoc.id)
+                                    if (sol != null) {
+                                        val fechaFormateada = sol.fechaCreacion?.let { sdf.format(it) } ?: "Reciente"
+                                        postulacionesTemp.add(
+                                            TrabajoItemUI(
+                                                id = sol.id,
+                                                clienteId = sol.clienteId,
+                                                clienteNombre = sol.clienteNombre.ifBlank { "Cliente ServixYa" },
+                                                titulo = sol.detalleProblema.ifBlank { sol.categoria },
+                                                localidad = sol.localidad,
+                                                direccion = sol.direccion,
+                                                estado = if (estadoPropuesta == "PENDIENTE") "POSTULADO" else estadoPropuesta,
+                                                fecha = fechaFormateada,
+                                                subtituloEstado = if (estadoPropuesta == "PENDIENTE") "En espera de selección" else null
+                                            )
+                                        )
+                                    }
+                                    pendientes--
+                                    if (pendientes == 0) {
+                                        listaMisTrabajosActivos = activos
+                                        listaHistorialTrabajos = (historial + postulacionesTemp).distinctBy { it.id }
+                                        estaCargandoMisTrabajos = false
+                                    }
+                                }
+                                .addOnFailureListener {
+                                    pendientes--
+                                    if (pendientes == 0) {
+                                        listaMisTrabajosActivos = activos
+                                        listaHistorialTrabajos = (historial + postulacionesTemp).distinctBy { it.id }
+                                        estaCargandoMisTrabajos = false
+                                    }
+                                }
+                        }
+                    }
+            }
+    }
 }
