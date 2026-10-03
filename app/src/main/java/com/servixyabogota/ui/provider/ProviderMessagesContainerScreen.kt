@@ -95,7 +95,6 @@ fun ProviderMessagesContainerScreen(
                 }
 
                 if (snapshotPropuestas == null || snapshotPropuestas.isEmpty) {
-                    // Si no hay postulaciones en subcolecciones, verificar solicitudes asignadas directamente
                     db.collection("solicitudes")
                         .whereEqualTo("prestadorId", currentUserId)
                         .get()
@@ -106,7 +105,8 @@ fun ProviderMessagesContainerScreen(
                             } else {
                                 cargarDetallesSolicitudes(
                                     solicitudDocs = snapshotSolicitudes.documents,
-                                    db = db
+                                    db = db,
+                                    currentUserId = currentUserId
                                 ) { lista ->
                                     chatsSolicitudes = lista
                                     isLoading = false
@@ -120,7 +120,6 @@ fun ProviderMessagesContainerScreen(
                     return@addSnapshotListener
                 }
 
-                // Obtener los documentos de las solicitudes padre
                 val propuestasDocs = snapshotPropuestas.documents
                 val solicitudesMap = mutableMapOf<String, DocumentSnapshot>()
                 val totalPropuestas = propuestasDocs.size
@@ -137,7 +136,8 @@ fun ProviderMessagesContainerScreen(
                             if (procesadasPropuestas == totalPropuestas) {
                                 cargarDetallesSolicitudes(
                                     solicitudDocs = solicitudesMap.values.toList(),
-                                    db = db
+                                    db = db,
+                                    currentUserId = currentUserId
                                 ) { lista ->
                                     chatsSolicitudes = lista
                                     isLoading = false
@@ -148,7 +148,8 @@ fun ProviderMessagesContainerScreen(
                             if (procesadasPropuestas == totalPropuestas) {
                                 cargarDetallesSolicitudes(
                                     solicitudDocs = solicitudesMap.values.toList(),
-                                    db = db
+                                    db = db,
+                                    currentUserId = currentUserId
                                 ) { lista ->
                                     chatsSolicitudes = lista
                                     isLoading = false
@@ -160,7 +161,8 @@ fun ProviderMessagesContainerScreen(
                         if (procesadasPropuestas == totalPropuestas) {
                             cargarDetallesSolicitudes(
                                 solicitudDocs = solicitudesMap.values.toList(),
-                                db = db
+                                db = db,
+                                currentUserId = currentUserId
                             ) { lista ->
                                 chatsSolicitudes = lista
                                 isLoading = false
@@ -190,49 +192,86 @@ fun ProviderMessagesContainerScreen(
                             val timestamp = doc.getTimestamp("fechaUltimoMensaje")
                             val horaFormateada = formatearFecha(timestamp)
 
-                            if (clienteId.isNotBlank()) {
-                                db.collection("usuarios").document(clienteId).get()
-                                    .addOnSuccessListener { clientDoc ->
-                                        val nombreCliente = clientDoc.getString("nombreCompleto")
-                                            ?: clientDoc.getString("nombre")
-                                            ?: "Cliente Directo"
+                            val noLeidosDirecto = (doc.getLong("noLeidosPrestador")
+                                ?: doc.getLong("noLeidos_$currentUserId")
+                                ?: doc.getLong("noLeidos") ?: 0L).toInt()
 
-                                        val fotoCliente = clientDoc.getString("fotoUrl")
-                                            ?: clientDoc.getString("fotoPerfilUrl")
-                                            ?: clientDoc.getString("foto")
-                                            ?: ""
-
-                                        listaTemp.add(
-                                            ChatItemUi(
-                                                id = chatId,
-                                                nombreCliente = nombreCliente,
-                                                fotoCliente = fotoCliente,
-                                                ultimoMensaje = ultimoMsg,
-                                                hora = horaFormateada,
-                                                noLeidos = 0,
-                                                tituloSolicitud = null
-                                            )
-                                        )
-                                        procesados++
-                                        if (procesados == totalDocs) {
-                                            chatsDirectos = listaTemp
-                                            isLoading = false
-                                        }
-                                    }
-                                    .addOnFailureListener {
-                                        procesados++
-                                        if (procesados == totalDocs) {
-                                            chatsDirectos = listaTemp
-                                            isLoading = false
-                                        }
-                                    }
-                            } else {
+                            fun agregarChatDirecto(nombreCliente: String, fotoCliente: String, noLeidosCount: Int) {
+                                listaTemp.add(
+                                    ChatItemUi(
+                                        id = chatId,
+                                        nombreCliente = nombreCliente,
+                                        fotoCliente = fotoCliente,
+                                        ultimoMensaje = ultimoMsg,
+                                        hora = horaFormateada,
+                                        noLeidos = noLeidosCount,
+                                        tituloSolicitud = null
+                                    )
+                                )
                                 procesados++
                                 if (procesados == totalDocs) {
-                                    chatsDirectos = listaTemp
+                                    chatsDirectos = listaTemp.distinctBy { it.id }
                                     isLoading = false
                                 }
                             }
+
+                            // Consultar subcolección de mensajes no leídos para chats directos
+                            db.collection("chats").document(chatId)
+                                .collection("mensajes")
+                                .whereEqualTo("leido", false)
+                                .get()
+                                .addOnSuccessListener { msgSnap ->
+                                    val noLeidosSubcoleccion = msgSnap.documents.count { msgDoc ->
+                                        val emisorId = msgDoc.getString("emisorId") ?: msgDoc.getString("remitenteId") ?: ""
+                                        val receptorId = msgDoc.getString("receptorId") ?: ""
+                                        receptorId == currentUserId || (emisorId.isNotBlank() && emisorId != currentUserId)
+                                    }
+
+                                    val noLeidosFinal = maxOf(noLeidosDirecto, noLeidosSubcoleccion)
+
+                                    if (clienteId.isNotBlank()) {
+                                        db.collection("usuarios").document(clienteId).get()
+                                            .addOnSuccessListener { clientDoc ->
+                                                val nombreCliente = clientDoc.getString("nombreCompleto")
+                                                    ?: clientDoc.getString("nombre")
+                                                    ?: "Cliente Directo"
+
+                                                val fotoCliente = clientDoc.getString("fotoUrl")
+                                                    ?: clientDoc.getString("fotoPerfilUrl")
+                                                    ?: clientDoc.getString("foto")
+                                                    ?: ""
+
+                                                agregarChatDirecto(nombreCliente, fotoCliente, noLeidosFinal)
+                                            }
+                                            .addOnFailureListener {
+                                                agregarChatDirecto("Cliente Directo", "", noLeidosFinal)
+                                            }
+                                    } else {
+                                        agregarChatDirecto("Cliente Directo", "", noLeidosFinal)
+                                    }
+                                }
+                                .addOnFailureListener {
+                                    if (clienteId.isNotBlank()) {
+                                        db.collection("usuarios").document(clienteId).get()
+                                            .addOnSuccessListener { clientDoc ->
+                                                val nombreCliente = clientDoc.getString("nombreCompleto")
+                                                    ?: clientDoc.getString("nombre")
+                                                    ?: "Cliente Directo"
+
+                                                val fotoCliente = clientDoc.getString("fotoUrl")
+                                                    ?: clientDoc.getString("fotoPerfilUrl")
+                                                    ?: clientDoc.getString("foto")
+                                                    ?: ""
+
+                                                agregarChatDirecto(nombreCliente, fotoCliente, noLeidosDirecto)
+                                            }
+                                            .addOnFailureListener {
+                                                agregarChatDirecto("Cliente Directo", "", noLeidosDirecto)
+                                            }
+                                    } else {
+                                        agregarChatDirecto("Cliente Directo", "", noLeidosDirecto)
+                                    }
+                                }
                         }
                     }
                 } else {
@@ -332,6 +371,7 @@ fun ProviderMessagesContainerScreen(
 private fun cargarDetallesSolicitudes(
     solicitudDocs: List<DocumentSnapshot>,
     db: FirebaseFirestore,
+    currentUserId: String,
     onResult: (List<ChatItemUi>) -> Unit
 ) {
     if (solicitudDocs.isEmpty()) {
@@ -357,46 +397,85 @@ private fun cargarDetallesSolicitudes(
         val emoji = obtenerEmojiCategoria(categoriaRaw)
         val tituloServicio = "$emoji $categoriaRaw"
 
-        if (clienteId.isNotBlank()) {
-            db.collection("usuarios").document(clienteId).get()
-                .addOnSuccessListener { clientDoc ->
-                    val nombreCliente = clientDoc.getString("nombreCompleto")
-                        ?: clientDoc.getString("nombre")
-                        ?: "Cliente"
+        val noLeidosDirecto = (doc.getLong("noLeidosPrestador")
+            ?: doc.getLong("noLeidos_$currentUserId")
+            ?: doc.getLong("noLeidos") ?: 0L).toInt()
 
-                    val fotoCliente = clientDoc.getString("fotoUrl")
-                        ?: clientDoc.getString("fotoPerfilUrl")
-                        ?: clientDoc.getString("foto")
-                        ?: ""
-
-                    listaTemp.add(
-                        ChatItemUi(
-                            id = chatId,
-                            nombreCliente = nombreCliente,
-                            fotoCliente = fotoCliente,
-                            ultimoMensaje = ultimoMsg,
-                            hora = horaFormateada,
-                            noLeidos = 0,
-                            tituloSolicitud = tituloServicio
-                        )
-                    )
-                    procesados++
-                    if (procesados == totalDocs) {
-                        onResult(listaTemp.distinctBy { it.id })
-                    }
-                }
-                .addOnFailureListener {
-                    procesados++
-                    if (procesados == totalDocs) {
-                        onResult(listaTemp.distinctBy { it.id })
-                    }
-                }
-        } else {
+        fun agregarItem(nombreCliente: String, fotoCliente: String, noLeidosCount: Int) {
+            listaTemp.add(
+                ChatItemUi(
+                    id = chatId,
+                    nombreCliente = nombreCliente,
+                    fotoCliente = fotoCliente,
+                    ultimoMensaje = ultimoMsg,
+                    hora = horaFormateada,
+                    noLeidos = noLeidosCount,
+                    tituloSolicitud = tituloServicio
+                )
+            )
             procesados++
             if (procesados == totalDocs) {
                 onResult(listaTemp.distinctBy { it.id })
             }
         }
+
+        // Consultar mensajes no leídos en la subcolección
+        db.collection("solicitudes").document(chatId)
+            .collection("mensajes")
+            .whereEqualTo("leido", false)
+            .get()
+            .addOnSuccessListener { msgSnap ->
+                val noLeidosSubcoleccion = msgSnap.documents.count { msgDoc ->
+                    val emisorId = msgDoc.getString("emisorId") ?: msgDoc.getString("remitenteId") ?: ""
+                    val receptorId = msgDoc.getString("receptorId") ?: ""
+                    receptorId == currentUserId || (emisorId.isNotBlank() && emisorId != currentUserId)
+                }
+
+                val noLeidosFinal = maxOf(noLeidosDirecto, noLeidosSubcoleccion)
+
+                if (clienteId.isNotBlank()) {
+                    db.collection("usuarios").document(clienteId).get()
+                        .addOnSuccessListener { clientDoc ->
+                            val nombreCliente = clientDoc.getString("nombreCompleto")
+                                ?: clientDoc.getString("nombre")
+                                ?: "Cliente"
+
+                            val fotoCliente = clientDoc.getString("fotoUrl")
+                                ?: clientDoc.getString("fotoPerfilUrl")
+                                ?: clientDoc.getString("foto")
+                                ?: ""
+
+                            agregarItem(nombreCliente, fotoCliente, noLeidosFinal)
+                        }
+                        .addOnFailureListener {
+                            agregarItem("Cliente", "", noLeidosFinal)
+                        }
+                } else {
+                    agregarItem("Cliente", "", noLeidosFinal)
+                }
+            }
+            .addOnFailureListener {
+                if (clienteId.isNotBlank()) {
+                    db.collection("usuarios").document(clienteId).get()
+                        .addOnSuccessListener { clientDoc ->
+                            val nombreCliente = clientDoc.getString("nombreCompleto")
+                                ?: clientDoc.getString("nombre")
+                                ?: "Cliente"
+
+                            val fotoCliente = clientDoc.getString("fotoUrl")
+                                ?: clientDoc.getString("fotoPerfilUrl")
+                                ?: clientDoc.getString("foto")
+                                ?: ""
+
+                            agregarItem(nombreCliente, fotoCliente, noLeidosDirecto)
+                        }
+                        .addOnFailureListener {
+                            agregarItem("Cliente", "", noLeidosDirecto)
+                        }
+                } else {
+                    agregarItem("Cliente", "", noLeidosDirecto)
+                }
+            }
     }
 }
 
@@ -434,7 +513,6 @@ private fun ChatListItem(
             modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Contenedor de Foto de Perfil o Icono por defecto
             Box(
                 modifier = Modifier
                     .size(48.dp)
@@ -498,7 +576,8 @@ private fun ChatListItem(
                     Text(
                         text = chat.hora,
                         fontSize = 11.sp,
-                        color = Color.Gray
+                        color = if (chat.noLeidos > 0) Color(0xFFFF8F00) else Color.Gray,
+                        fontWeight = if (chat.noLeidos > 0) FontWeight.Bold else FontWeight.Normal
                     )
                 }
 
@@ -513,7 +592,7 @@ private fun ChatListItem(
                         text = chat.ultimoMensaje,
                         fontSize = 13.sp,
                         color = if (chat.noLeidos > 0) Color(0xFF111827) else Color.Gray,
-                        fontWeight = if (chat.noLeidos > 0) FontWeight.SemiBold else FontWeight.Normal,
+                        fontWeight = if (chat.noLeidos > 0) FontWeight.Bold else FontWeight.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
@@ -523,15 +602,16 @@ private fun ChatListItem(
                         Spacer(modifier = Modifier.width(8.dp))
                         Box(
                             modifier = Modifier
-                                .size(20.dp)
+                                .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFFF8F00)),
+                                .background(Color(0xFFFF8F00))
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = chat.noLeidos.toString(),
+                                text = if (chat.noLeidos > 99) "99+" else chat.noLeidos.toString(),
                                 color = Color.White,
-                                fontSize = 10.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
