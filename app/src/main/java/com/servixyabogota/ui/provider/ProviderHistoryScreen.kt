@@ -44,6 +44,11 @@ fun ProviderHistoryScreen(
 ) {
     var tabSeleccionada by remember { mutableIntStateOf(0) }
 
+    // Obtener únicamente los trabajos finalizados/completados
+    val trabajosCompletados = remember(historialReciente) {
+        historialReciente.filter { it.estado == "COMPLETADO" }
+    }
+
     if (estaCargando && trabajosActivos.isEmpty() && historialReciente.isEmpty()) {
         Box(
             modifier = Modifier
@@ -164,84 +169,125 @@ fun ProviderHistoryScreen(
             HorizontalDivider(color = Color(0xFFE5E7EB), thickness = 1.dp)
         }
 
-        // --- TRABAJOS ACTUALES ---
-        item {
-            Text(
-                text = "TRABAJOS ACTUALES",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF374151),
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)
-            )
-        }
-
-        if (trabajosActivos.isEmpty()) {
+        if (tabSeleccionada == 0) {
+            // --- PESTAÑA 0: TRABAJOS ACEPTADOS ---
             item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text(
-                        text = "No tienes trabajos activos en este momento.",
-                        fontSize = 13.sp,
-                        color = Color.Gray,
-                        modifier = Modifier.padding(16.dp)
+                Text(
+                    text = "TRABAJOS ACTUALES",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF374151),
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)
+                )
+            }
+
+            if (trabajosActivos.isEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = "No tienes trabajos activos en este momento.",
+                            fontSize = 13.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
+                }
+            } else {
+                items(
+                    items = trabajosActivos,
+                    key = { it.id }
+                ) { trabajo ->
+                    TrabajoActualCard(
+                        trabajo = trabajo,
+                        onAbrirChat = { onAbrirChatCliente(trabajo.id, trabajo.clienteId) },
+                        onVerDetalle = { onVerDetalleSolicitud(trabajo.id) }
+                    )
+                }
+            }
+
+            item {
+                Text(
+                    text = "HISTORIAL RECIENTE",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF374151),
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)
+                )
+            }
+
+            if (historialReciente.isEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = "Aún no tienes historial de postulaciones o trabajos.",
+                            fontSize = 13.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
+                }
+            } else {
+                items(
+                    items = historialReciente,
+                    key = { it.id }
+                ) { trabajo ->
+                    TrabajoHistorialCard(
+                        trabajo = trabajo,
+                        onClick = { onVerDetalleSolicitud(trabajo.id) }
                     )
                 }
             }
         } else {
-            items(
-                items = trabajosActivos,
-                key = { it.id }
-            ) { trabajo ->
-                TrabajoActualCard(
-                    trabajo = trabajo,
-                    onAbrirChat = { onAbrirChatCliente(trabajo.id, trabajo.clienteId) },
-                    onVerDetalle = { onVerDetalleSolicitud(trabajo.id) }
+            // --- PESTAÑA 1: HISTORIAL COMPLETO DE TRABAJOS COMPLETADOS ---
+            item {
+                Text(
+                    text = "TRABAJOS COMPLETADOS",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF374151),
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)
                 )
             }
-        }
 
-        // --- HISTORIAL RECIENTE ---
-        item {
-            Text(
-                text = "HISTORIAL RECIENTE",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF374151),
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)
-            )
-        }
-
-        if (historialReciente.isEmpty()) {
-            item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text(
-                        text = "Aún no tienes historial de postulaciones o trabajos.",
-                        fontSize = 13.sp,
-                        color = Color.Gray,
-                        modifier = Modifier.padding(16.dp)
+            if (trabajosCompletados.isEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = "Aún no tienes trabajos completados.",
+                            fontSize = 13.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
+                }
+            } else {
+                items(
+                    items = trabajosCompletados,
+                    key = { it.id }
+                ) { trabajo ->
+                    TrabajoHistorialCard(
+                        trabajo = trabajo,
+                        onClick = { onVerDetalleSolicitud(trabajo.id) }
                     )
                 }
-            }
-        } else {
-            items(
-                items = historialReciente,
-                key = { it.id }
-            ) { trabajo ->
-                TrabajoHistorialCard(
-                    trabajo = trabajo,
-                    onClick = { onVerDetalleSolicitud(trabajo.id) }
-                )
             }
         }
     }
