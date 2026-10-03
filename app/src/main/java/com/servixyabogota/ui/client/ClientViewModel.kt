@@ -93,7 +93,7 @@ class ClientViewModel : ViewModel() {
                 }
             }
 
-        // 2. Escuchar reseñas OTORGADAS por el cliente a prestadores (Cliente -> Prestador)
+        // 2. Escuchar reseñas OTORGADAS por el cliente a prestadores
         db.collection("resenas")
             .whereEqualTo("autorId", uid)
             .addSnapshotListener { snapshot, error ->
@@ -215,7 +215,7 @@ class ClientViewModel : ViewModel() {
                 }
             }
 
-        // 3. Escuchar reseñas RECIBIDAS por el cliente (Prestador -> Cliente)
+        // 3. Escuchar reseñas RECIBIDAS por el cliente
         db.collection("resenas")
             .whereEqualTo("destinatarioId", uid)
             .whereEqualTo("tipo", "PRESTADOR_A_CLIENTE")
@@ -342,18 +342,15 @@ class ClientViewModel : ViewModel() {
                             ?: (doc.get("especialidades") as? List<String>)
                             ?: emptyList()
 
-                        // Es prestador si tiene rol de prestador o si ya definió sus categorías
                         val esPrestador = rol.equals("PRESTADOR", ignoreCase = true) ||
                                 rol.equals("prestador", ignoreCase = true) ||
                                 categoriasList.isNotEmpty()
 
-                        // VALIDACIÓN ESTRICTA DE VERIFICACIÓN
                         val estadoVerificacion = doc.getString("estadoVerificacion")
                             ?: doc.getString("estado_verificacion")
                             ?: ""
                         val estaAprobado = estadoVerificacion.equals("APROBADO", ignoreCase = true)
 
-                        // Si no es prestador O no está APROBADO, se descarta inmediatamente
                         if (!esPrestador || !estaAprobado) return@mapNotNull null
 
                         val nombreCompletoDoc = doc.getString("nombreCompleto")
@@ -402,7 +399,7 @@ class ClientViewModel : ViewModel() {
                             totalResenas = totalResenas,
                             categorias = categoriasList,
                             disponibleHoy = disponibleHoy,
-                            verificado = true, // Al estar APROBADO, garantizamos que sea verificado
+                            verificado = true,
                             descripcion = descripcion,
                             experienciaAnos = experienciaAnos,
                             portafolioUrls = portafolioUrls,
@@ -417,7 +414,7 @@ class ClientViewModel : ViewModel() {
     }
 
     /**
-     * Crea un canal de chat directo en Firestore entre el cliente autenticado y el prestador
+     * Crea un canal de chat directo en Firestore entre el cliente y el prestador
      */
     fun obtenerOCrearChatDirecto(
         prestadorId: String,
@@ -430,7 +427,6 @@ class ClientViewModel : ViewModel() {
             return
         }
 
-        // Crea un ID determinista para evitar duplicar salas entre los dos mismos usuarios
         val chatIdConstruido = if (clienteId < prestadorId) {
             "chat_${clienteId}_$prestadorId"
         } else {
@@ -507,7 +503,7 @@ class ClientViewModel : ViewModel() {
     }
 
     /**
-     * Actualiza el nombre, teléfono y/o la foto de perfil en Firebase Storage y Firestore
+     * Actualiza el perfil en Firebase Storage y Firestore
      */
     fun guardarCambiosPerfil(
         nuevoNombre: String,
@@ -688,6 +684,53 @@ class ClientViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Acepta la oferta de un prestador para una solicitud.
+     * Cambia la solicitud a estado EN_PROCESO y asigna al prestador para que le aparezca en Trabajos Actuales.
+     */
+    fun aceptarPropuesta(
+        solicitudId: String,
+        propuestaId: String,
+        prestadorId: String,
+        prestadorNombre: String = "",
+        monto: Double = 0.0,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        if (solicitudId.isBlank() || prestadorId.isBlank()) {
+            onError("ID de solicitud o prestador no válido.")
+            return
+        }
+
+        viewModelScope.launch {
+            val solicitudRef = db.collection("solicitudes").document(solicitudId)
+            val propuestaRef = solicitudRef.collection("propuestas").document(propuestaId)
+
+            val datosSolicitud = mapOf(
+                "estado" to "EN_PROCESO",
+                "prestadorIdAsignado" to prestadorId,
+                "prestadorId" to prestadorId,
+                "prestadorNombre" to prestadorNombre,
+                "montoAcordado" to monto,
+                "fechaAsignacion" to Timestamp.now()
+            )
+
+            val datosPropuesta = mapOf(
+                "estado" to "ACEPTADA",
+                "fechaAceptacion" to Timestamp.now()
+            )
+
+            db.runTransaction { transaction ->
+                transaction.update(solicitudRef, datosSolicitud)
+                transaction.update(propuestaRef, datosPropuesta)
+            }.addOnSuccessListener {
+                onSuccess()
+            }.addOnFailureListener { e ->
+                onError(e.localizedMessage ?: "Error al aceptar la propuesta")
+            }
+        }
+    }
+
     fun cerrarSesion(onLogout: () -> Unit) {
         auth.signOut()
         onLogout()
@@ -749,18 +792,14 @@ class ClientViewModel : ViewModel() {
     }
 
     // ==========================================
-// ESTADOS Y CÓDIGO PARA VER RESEÑAS PÚBLICAS DEL PRESTADOR
-// ==========================================
+    // ESTADOS Y CÓDIGO PARA VER RESEÑAS PÚBLICAS DEL PRESTADOR
+    // ==========================================
     var listaResenasDelPrestador by mutableStateOf<List<ReviewItem>>(emptyList())
         private set
 
     var estaCargandoResenasPrestador by mutableStateOf(false)
         private set
 
-
-    /**
-     * Consulta en Firestore todas las reseñas recibidas por un prestador específico
-     */
     fun cargarResenasDelPrestador(prestadorId: String) {
         if (prestadorId.isBlank()) return
         estaCargandoResenasPrestador = true
@@ -791,7 +830,6 @@ class ClientViewModel : ViewModel() {
     ) {
         val resenasTemp = mutableListOf<ReviewItem>()
 
-        // Descartamos las reseñas hechas de Prestador a Cliente o donde el autor sea el prestador
         val docsFiltrados = documents.filter { doc ->
             val tipo = doc.getString("tipo") ?: ""
             val autorId = doc.getString("autorId") ?: ""
@@ -810,7 +848,6 @@ class ClientViewModel : ViewModel() {
         for (doc in docsFiltrados) {
             val reviewId = doc.id
 
-            // Extraemos el ID del cliente (priorizando clienteId)
             val clienteUid = doc.getString("clienteId")
                 ?.takeIf { it.isNotBlank() && it != prestadorId }
                 ?: doc.getString("autorId")
@@ -833,7 +870,6 @@ class ClientViewModel : ViewModel() {
                 ?: doc.getString("autorFoto")
                 ?: doc.getString("autorFotoUrl")
 
-            // Si el documento de la reseña ya contiene la URL de la foto
             if (!autorNombreDirecto.isNullOrBlank() && !fotoDirecta.isNullOrBlank()) {
                 resenasTemp.add(
                     ReviewItem(
@@ -852,7 +888,6 @@ class ClientViewModel : ViewModel() {
                     estaCargandoResenasPrestador = false
                 }
             } else if (clienteUid.isNotBlank()) {
-                // Consultamos el documento del cliente en 'usuarios' usando su clienteId/fotoUrl
                 db.collection("usuarios").document(clienteUid).get()
                     .addOnSuccessListener { userDoc ->
                         val nombreDoc = userDoc.getString("nombreCompleto")

@@ -28,7 +28,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// Modelo UI para las reseñas reales (incluye fotoUrl)
+// Modelo UI para las reseñas reales
 data class ReviewItem(
     val id: String = "",
     val nombre: String = "Cliente",
@@ -80,6 +80,10 @@ class ProviderViewModel : ViewModel() {
 
     private val repository: SolicitudRepository = SolicitudRepository()
 
+    // Propiedad pública para acceder al ID del prestador actual
+    val prestadorId: String
+        get() = auth.currentUser?.uid ?: ""
+
     // ESTADO PARA CHATS DIRECTOS REALES
     var listaChatsDirectos by mutableStateOf<List<ProviderDirectChatUi>>(emptyList())
         private set
@@ -98,10 +102,19 @@ class ProviderViewModel : ViewModel() {
     var estaCargandoResenas by mutableStateOf(false)
         private set
 
+    // ESTADO DE MIS TRABAJOS Y POSTULACIONES REALES
+    var listaMisTrabajosActivos by mutableStateOf<List<TrabajoItemUI>>(emptyList())
+        private set
+    var listaHistorialTrabajos by mutableStateOf<List<TrabajoItemUI>>(emptyList())
+        private set
+    var estaCargandoMisTrabajos by mutableStateOf(false)
+        private set
+
     init {
         cargarPerfil()
         escucharChatsDirectos()
         escucharResenas()
+        escucharMisTrabajos()
     }
 
     /**
@@ -637,7 +650,7 @@ class ProviderViewModel : ViewModel() {
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
-        val user = FirebaseAuth.getInstance().currentUser
+        val user = auth.currentUser
         val email = user?.email
 
         if (user == null || email.isNullOrEmpty()) {
@@ -651,7 +664,6 @@ class ProviderViewModel : ViewModel() {
             if (reauthTask.isSuccessful) {
                 user.updatePassword(nuevaContrasena).addOnCompleteListener { updateTask ->
                     if (updateTask.isSuccessful) {
-                        val db = FirebaseFirestore.getInstance()
                         db.collection("usuarios").document(user.uid)
                             .update("ultimaActualizacionPassword", Timestamp.now())
                             .addOnSuccessListener { onSuccess() }
@@ -672,8 +684,7 @@ class ProviderViewModel : ViewModel() {
         onSuccess: () -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
-        val user = FirebaseAuth.getInstance().currentUser ?: return
-        val db = FirebaseFirestore.getInstance()
+        val user = auth.currentUser ?: return
 
         val updates = mapOf(
             "notificacionesPushChat" to notificacionesPushChat,
@@ -698,15 +709,16 @@ class ProviderViewModel : ViewModel() {
 
     fun enviarCotizacion(
         solicitudId: String,
-        prestadorId: String,
+        prestadorIdParam: String,
         prestadorNombre: String,
         precio: Double,
         mensaje: String,
         onResult: (Boolean) -> Unit
     ) {
         viewModelScope.launch {
+            val idFinal = prestadorIdParam.ifBlank { prestadorId }
             val propuesta = Propuesta(
-                prestadorId = prestadorId,
+                prestadorId = idFinal,
                 prestadorNombre = prestadorNombre,
                 precioEstimado = precio,
                 mensaje = mensaje
@@ -723,14 +735,14 @@ class ProviderViewModel : ViewModel() {
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
-        val prestadorId = auth.currentUser?.uid
-        if (prestadorId.isNullOrEmpty()) {
+        val currentUid = auth.currentUser?.uid
+        if (currentUid.isNullOrEmpty()) {
             onError("Debes iniciar sesión para postularte")
             return
         }
 
         viewModelScope.launch {
-            db.collection("usuarios").document(prestadorId).get()
+            db.collection("usuarios").document(currentUid).get()
                 .addOnSuccessListener { docPrestador ->
                     val nombrePrestador = docPrestador.getString("nombreCompleto")
                         ?: docPrestador.getString("nombre") ?: "Prestador ServixYa"
@@ -739,7 +751,7 @@ class ProviderViewModel : ViewModel() {
                     val totalResenas = docPrestador.getLong("totalResenas")?.toInt() ?: 0
 
                     val datosPropuesta = hashMapOf(
-                        "prestadorId" to prestadorId,
+                        "prestadorId" to currentUid,
                         "prestadorNombre" to nombrePrestador,
                         "prestadorFotoUrl" to fotoPrestador,
                         "calificacion" to calificacion,
@@ -755,7 +767,7 @@ class ProviderViewModel : ViewModel() {
                     val propuestaRef = db.collection("solicitudes")
                         .document(solicitudId)
                         .collection("propuestas")
-                        .document(prestadorId)
+                        .document(currentUid)
 
                     batch.set(propuestaRef, datosPropuesta, SetOptions.merge())
 
@@ -766,7 +778,7 @@ class ProviderViewModel : ViewModel() {
                     val primerMensajeRef = solicitudRef.collection("mensajes").document()
                     val primerMensaje = hashMapOf(
                         "id" to primerMensajeRef.id,
-                        "emisorId" to prestadorId,
+                        "emisorId" to currentUid,
                         "texto" to "Hola, me he postulado a tu solicitud. $mensajePresentacion",
                         "fechaEnvio" to Timestamp.now(),
                         "esOferta" to true,
@@ -794,7 +806,6 @@ class ProviderViewModel : ViewModel() {
         db.collection("solicitudes").document(solicitudId).get()
             .addOnSuccessListener { document ->
                 if (document.exists()) {
-                    // Se agrega ?.copy(id = document.id) para asegurar que la solicitud lleve su ID real
                     val solicitud = document.toObject(Solicitud::class.java)?.copy(id = document.id)
                     onResult(solicitud)
                 } else {
@@ -806,21 +817,6 @@ class ProviderViewModel : ViewModel() {
             }
     }
 
-    // --- ESTADO DE MIS TRABAJOS Y POSTULACIONES REALES ---
-    var listaMisTrabajosActivos by mutableStateOf<List<TrabajoItemUI>>(emptyList())
-        private set
-    var listaHistorialTrabajos by mutableStateOf<List<TrabajoItemUI>>(emptyList())
-        private set
-    var estaCargandoMisTrabajos by mutableStateOf(false)
-        private set
-
-    init {
-        cargarPerfil()
-        escucharChatsDirectos()
-        escucharResenas()
-        escucharMisTrabajos() // <--- Se agrega la escucha de trabajos al iniciar
-    }
-
     /**
      * Escucha en tiempo real las solicitudes asignadas y postuladas del prestador autenticado
      */
@@ -829,109 +825,113 @@ class ProviderViewModel : ViewModel() {
         estaCargandoMisTrabajos = true
 
         val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+        val estadosActivos = setOf("EN_PROCESO", "ACEPTADA", "ACEPTADO", "EN_CURSO", "EN PROCESO")
 
-        // 1. Listener de Solicitudes Asignadas directamente a este prestador
-        db.collection("solicitudes")
-            .whereEqualTo("prestadorIdAsignado", uid)
-            .addSnapshotListener { snapshot, error ->
+        db.collectionGroup("propuestas")
+            .whereEqualTo("prestadorId", uid)
+            .addSnapshotListener { propSnapshot, error ->
                 if (error != null) {
                     estaCargandoMisTrabajos = false
                     return@addSnapshotListener
                 }
 
-                val activos = mutableListOf<TrabajoItemUI>()
-                val historial = mutableListOf<TrabajoItemUI>()
-
-                snapshot?.documents?.forEach { doc ->
-                    val solicitud = doc.toObject(Solicitud::class.java)?.copy(id = doc.id) ?: return@forEach
-                    val fechaFormateada = solicitud.fechaCreacion?.let { sdf.format(it) } ?: "Reciente"
-
-                    val item = TrabajoItemUI(
-                        id = solicitud.id,
-                        clienteId = solicitud.clienteId,
-                        clienteNombre = solicitud.clienteNombre.ifBlank { "Cliente ServixYa" },
-                        titulo = solicitud.detalleProblema.ifBlank { solicitud.categoria },
-                        localidad = solicitud.localidad,
-                        direccion = solicitud.direccion,
-                        estado = if (solicitud.estado == "EN_PROCESO") "ACEPTADO" else solicitud.estado,
-                        fecha = fechaFormateada,
-                        subtituloEstado = if (solicitud.estado == "COMPLETADO") "Trabajo completado" else null
-                    )
-
-                    if (solicitud.estado == "EN_PROCESO" || solicitud.estado == "ACEPTADA") {
-                        activos.add(item)
-                    } else {
-                        historial.add(item)
-                    }
+                if (propSnapshot == null || propSnapshot.isEmpty) {
+                    listaMisTrabajosActivos = emptyList()
+                    listaHistorialTrabajos = emptyList()
+                    estaCargandoMisTrabajos = false
+                    return@addSnapshotListener
                 }
 
-                // 2. Consulta adicional para solicitudes donde se postuló (collectionGroup en 'propuestas')
-                db.collectionGroup("propuestas")
-                    .whereEqualTo("prestadorId", uid)
-                    .addSnapshotListener { propSnapshot, _ ->
-                        val idsAsignados = snapshot?.documents?.map { it.id }?.toSet() ?: emptySet()
+                val activosTemp = mutableListOf<TrabajoItemUI>()
+                val historialTemp = mutableListOf<TrabajoItemUI>()
+                var pendientes = propSnapshot.documents.size
 
-                        if (propSnapshot == null || propSnapshot.isEmpty) {
-                            listaMisTrabajosActivos = activos
-                            listaHistorialTrabajos = historial
+                for (pDoc in propSnapshot.documents) {
+                    val solicitudId = pDoc.reference.parent.parent?.id ?: ""
+                    val estadoPropuesta = (pDoc.getString("estado") ?: "PENDIENTE").uppercase()
+
+                    if (solicitudId.isBlank()) {
+                        pendientes--
+                        if (pendientes == 0) {
+                            listaMisTrabajosActivos = activosTemp.distinctBy { it.id }
+                            listaHistorialTrabajos = historialTemp.distinctBy { it.id }
                             estaCargandoMisTrabajos = false
-                            return@addSnapshotListener
                         }
+                        continue
+                    }
 
-                        var pendientes = propSnapshot.documents.size
-                        val postulacionesTemp = mutableListOf<TrabajoItemUI>()
+                    db.collection("solicitudes").document(solicitudId).get()
+                        .addOnSuccessListener { sDoc ->
+                            val sol = sDoc.toObject(Solicitud::class.java)?.copy(id = sDoc.id)
+                            if (sol != null) {
+                                val fechaFormateada = sol.fechaCreacion?.let { sdf.format(it) } ?: "Reciente"
+                                val estadoSolUpper = sol.estado.uppercase()
 
-                        for (pDoc in propSnapshot.documents) {
-                            val solicitudId = pDoc.reference.parent.parent?.id ?: ""
-                            val estadoPropuesta = pDoc.getString("estado") ?: "PENDIENTE"
+                                val esPrestadorAsignado = sol.prestadorIdAsignado == uid ||
+                                        sDoc.getString("prestadorId") == uid ||
+                                        sDoc.getString("proveedorId") == uid
 
-                            // Si la solicitud ya fue tomada arriba como asignada, la ignoramos para no duplicarla
-                            if (solicitudId.isBlank() || idsAsignados.contains(solicitudId)) {
-                                pendientes--
-                                if (pendientes == 0) {
-                                    listaMisTrabajosActivos = activos
-                                    listaHistorialTrabajos = (historial + postulacionesTemp).distinctBy { it.id }
-                                    estaCargandoMisTrabajos = false
+                                val esTrabajoActivo = (estadoSolUpper in estadosActivos || estadoPropuesta in estadosActivos) &&
+                                        (esPrestadorAsignado || estadoPropuesta == "ACEPTADA" || estadoPropuesta == "ACEPTADO")
+
+                                if (esTrabajoActivo) {
+                                    activosTemp.add(
+                                        TrabajoItemUI(
+                                            id = sol.id,
+                                            clienteId = sol.clienteId,
+                                            clienteNombre = sol.clienteNombre.ifBlank { "Cliente ServixYa" },
+                                            titulo = sol.detalleProblema.ifBlank { sol.categoria },
+                                            localidad = sol.localidad,
+                                            direccion = sol.direccion,
+                                            estado = "ACEPTADO",
+                                            fecha = fechaFormateada,
+                                            subtituloEstado = "Trabajo en proceso"
+                                        )
+                                    )
+                                } else {
+                                    val estadoMostrar = when (estadoPropuesta) {
+                                        "PENDIENTE" -> "POSTULADO"
+                                        else -> estadoPropuesta
+                                    }
+                                    val subtitulo = when (estadoPropuesta) {
+                                        "PENDIENTE" -> "En espera de selección"
+                                        "COMPLETADO", "COMPLETADA" -> "Trabajo completado"
+                                        "RECHAZADO", "RECHAZADA" -> "Propuesta no seleccionada"
+                                        else -> null
+                                    }
+
+                                    historialTemp.add(
+                                        TrabajoItemUI(
+                                            id = sol.id,
+                                            clienteId = sol.clienteId,
+                                            clienteNombre = sol.clienteNombre.ifBlank { "Cliente ServixYa" },
+                                            titulo = sol.detalleProblema.ifBlank { sol.categoria },
+                                            localidad = sol.localidad,
+                                            direccion = sol.direccion,
+                                            estado = estadoMostrar,
+                                            fecha = fechaFormateada,
+                                            subtituloEstado = subtitulo
+                                        )
+                                    )
                                 }
-                                continue
                             }
 
-                            db.collection("solicitudes").document(solicitudId).get()
-                                .addOnSuccessListener { sDoc ->
-                                    val sol = sDoc.toObject(Solicitud::class.java)?.copy(id = sDoc.id)
-                                    if (sol != null) {
-                                        val fechaFormateada = sol.fechaCreacion?.let { sdf.format(it) } ?: "Reciente"
-                                        postulacionesTemp.add(
-                                            TrabajoItemUI(
-                                                id = sol.id,
-                                                clienteId = sol.clienteId,
-                                                clienteNombre = sol.clienteNombre.ifBlank { "Cliente ServixYa" },
-                                                titulo = sol.detalleProblema.ifBlank { sol.categoria },
-                                                localidad = sol.localidad,
-                                                direccion = sol.direccion,
-                                                estado = if (estadoPropuesta == "PENDIENTE") "POSTULADO" else estadoPropuesta,
-                                                fecha = fechaFormateada,
-                                                subtituloEstado = if (estadoPropuesta == "PENDIENTE") "En espera de selección" else null
-                                            )
-                                        )
-                                    }
-                                    pendientes--
-                                    if (pendientes == 0) {
-                                        listaMisTrabajosActivos = activos
-                                        listaHistorialTrabajos = (historial + postulacionesTemp).distinctBy { it.id }
-                                        estaCargandoMisTrabajos = false
-                                    }
-                                }
-                                .addOnFailureListener {
-                                    pendientes--
-                                    if (pendientes == 0) {
-                                        listaMisTrabajosActivos = activos
-                                        listaHistorialTrabajos = (historial + postulacionesTemp).distinctBy { it.id }
-                                        estaCargandoMisTrabajos = false
-                                    }
-                                }
+                            pendientes--
+                            if (pendientes == 0) {
+                                listaMisTrabajosActivos = activosTemp.distinctBy { it.id }
+                                listaHistorialTrabajos = historialTemp.distinctBy { it.id }
+                                estaCargandoMisTrabajos = false
+                            }
                         }
-                    }
+                        .addOnFailureListener {
+                            pendientes--
+                            if (pendientes == 0) {
+                                listaMisTrabajosActivos = activosTemp.distinctBy { it.id }
+                                listaHistorialTrabajos = historialTemp.distinctBy { it.id }
+                                estaCargandoMisTrabajos = false
+                            }
+                        }
+                }
             }
     }
 }
