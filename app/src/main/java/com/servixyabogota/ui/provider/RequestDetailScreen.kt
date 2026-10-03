@@ -40,6 +40,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import coil.compose.rememberAsyncImagePainter
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.servixyabogota.data.model.Solicitud
 import java.text.NumberFormat
@@ -52,7 +53,6 @@ private fun esVideoUrl(url: String): Boolean {
             lower.contains(".webm") || lower.contains(".avi") || lower.contains("video")
 }
 
-// Modelo local para las reseñas del cliente recibidas desde otros prestadores
 data class ReviewClienteItem(
     val id: String = "",
     val autorNombre: String = "Prestador ServixYa",
@@ -76,7 +76,7 @@ fun DetalleSolicitudScreen(
     var videoParaReproducir by remember { mutableStateOf<String?>(null) }
     var imagenParaVer by remember { mutableStateOf<String?>(null) }
 
-    // ESTADOS PARA RESEÑAS Y REPUTACIÓN DEL CLIENTE
+    // ESTADOS DE RESEÑAS
     var mostrarModalResenas by remember { mutableStateOf(false) }
     var listaResenasCliente by remember { mutableStateOf<List<ReviewClienteItem>>(emptyList()) }
     var estaCargandoResenas by remember { mutableStateOf(true) }
@@ -141,87 +141,129 @@ fun DetalleSolicitudScreen(
                             }
                             estaCargandoResenas = false
                         }
-                        .addOnFailureListener {
-                            estaCargandoResenas = false
-                        }
+                        .addOnFailureListener { estaCargandoResenas = false }
                 }
-                .addOnFailureListener {
-                    estaCargandoResenas = false
-                }
+                .addOnFailureListener { estaCargandoResenas = false }
         } else {
             estaCargandoResenas = false
         }
     }
 
-    // 2. Escuchar en TIEMPO REAL la ruta exacta donde ProviderViewModel guarda la propuesta:
-    // solicitudes/{solicitudId}/propuestas/{prestadorId}
-    DisposableEffect(solicitud.id, currentUserId) {
+    // 2. Verificación Robusta y Filtrada de Propuesta Existente
+    LaunchedEffect(solicitud.id, currentUserId) {
         if (solicitud.id.isBlank() || currentUserId.isBlank()) {
             cargandoEstadoPropuesta = false
-            onDispose { }
-        } else {
-            cargandoEstadoPropuesta = true
-            val db = FirebaseFirestore.getInstance()
-            val estadosInactivosPropuesta = setOf("RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO")
-
-            val listenerPropuesta = db.collection("solicitudes")
-                .document(solicitud.id)
-                .collection("propuestas")
-                .document(currentUserId)
-                .addSnapshotListener { snapshot, _ ->
-                    if (snapshot != null && snapshot.exists()) {
-                        val estado = snapshot.getString("estado")?.uppercase() ?: "PENDIENTE"
-
-                        if (estado !in estadosInactivosPropuesta) {
-                            yaTienePropuestaActiva = true
-                            propuestaExistenteMonto = snapshot.getDouble("monto") ?: snapshot.getDouble("precioEstimado")
-                            propuestaExistenteTexto = snapshot.getString("mensaje") ?: snapshot.getString("propuesta") ?: ""
-                            cargandoEstadoPropuesta = false
-                            return@addSnapshotListener
-                        }
-                    }
-
-                    // Verificación alternativa por si existe en colección raíz "postulaciones"
-                    db.collection("postulaciones")
-                        .whereEqualTo("solicitudId", solicitud.id)
-                        .whereEqualTo("prestadorId", currentUserId)
-                        .get()
-                        .addOnSuccessListener { snapshotRaiz ->
-                            val docRaiz = snapshotRaiz.documents.firstOrNull { doc ->
-                                val st = doc.getString("estado")?.uppercase() ?: "PENDIENTE"
-                                st !in estadosInactivosPropuesta
-                            }
-                            if (docRaiz != null) {
-                                yaTienePropuestaActiva = true
-                                propuestaExistenteMonto = docRaiz.getDouble("monto") ?: docRaiz.getDouble("precio")
-                                propuestaExistenteTexto = docRaiz.getString("propuesta") ?: docRaiz.getString("mensaje") ?: ""
-                            } else {
-                                yaTienePropuestaActiva = false
-                                propuestaExistenteMonto = null
-                                propuestaExistenteTexto = ""
-                            }
-                            cargandoEstadoPropuesta = false
-                        }
-                        .addOnFailureListener {
-                            yaTienePropuestaActiva = false
-                            cargandoEstadoPropuesta = false
-                        }
-                }
-
-            onDispose {
-                listenerPropuesta.remove()
-            }
+            return@LaunchedEffect
         }
+
+        cargandoEstadoPropuesta = true
+        val db = FirebaseFirestore.getInstance()
+        val estadosInactivos = setOf("RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO")
+
+        fun verificarYEstablecerDoc(doc: DocumentSnapshot?): Boolean {
+            if (doc != null && doc.exists()) {
+                val estado = doc.getString("estado")?.uppercase() ?: "PENDIENTE"
+                if (estado !in estadosInactivos) {
+                    yaTienePropuestaActiva = true
+                    propuestaExistenteMonto = doc.getDouble("monto")
+                        ?: doc.getDouble("montoPropuesta")
+                                ?: doc.getDouble("precioEstimado")
+                                ?: doc.getDouble("precio")
+                    propuestaExistenteTexto = doc.getString("mensaje")
+                        ?: doc.getString("mensajePresentacion")
+                                ?: doc.getString("propuesta")
+                                ?: doc.getString("detalle")
+                                ?: ""
+                    cargandoEstadoPropuesta = false
+                    return true
+                }
+            }
+            return false
+        }
+
+        // Búsqueda 1: Documento directo por UID en solicitudes/{id}/propuestas/{uid}
+        db.collection("solicitudes").document(solicitud.id)
+            .collection("propuestas").document(currentUserId)
+            .get()
+            .addOnSuccessListener { docDirectoProp ->
+                if (verificarYEstablecerDoc(docDirectoProp)) return@addOnSuccessListener
+
+                // Búsqueda 2: Documento directo por UID en solicitudes/{id}/postulaciones/{uid}
+                db.collection("solicitudes").document(solicitud.id)
+                    .collection("postulaciones").document(currentUserId)
+                    .get()
+                    .addOnSuccessListener { docDirectoPost ->
+                        if (verificarYEstablecerDoc(docDirectoPost)) return@addOnSuccessListener
+
+                        // Búsqueda 3: Consulta en la subcolección 'propuestas' por prestadorId
+                        db.collection("solicitudes").document(solicitud.id)
+                            .collection("propuestas")
+                            .get()
+                            .addOnSuccessListener { snapPropSub ->
+                                val docEncontrado = snapPropSub.documents.firstOrNull { doc ->
+                                    val pId = doc.getString("prestadorId")
+                                        ?: doc.getString("proveedorId")
+                                        ?: doc.getString("idProveedor")
+                                        ?: doc.getString("usuarioId")
+                                        ?: doc.id
+                                    pId == currentUserId
+                                }
+
+                                if (verificarYEstablecerDoc(docEncontrado)) return@addOnSuccessListener
+
+                                // Búsqueda 4: Consulta en colección raíz 'postulaciones' con FILTROS
+                                db.collection("postulaciones")
+                                    .whereEqualTo("solicitudId", solicitud.id)
+                                    .whereEqualTo("prestadorId", currentUserId)
+                                    .get()
+                                    .addOnSuccessListener { snapRaizPost ->
+                                        val docRaiz = snapRaizPost.documents.firstOrNull()
+                                        if (verificarYEstablecerDoc(docRaiz)) return@addOnSuccessListener
+
+                                        // Búsqueda 5: Consulta en colección raíz 'propuestas' con FILTROS
+                                        db.collection("propuestas")
+                                            .whereEqualTo("solicitudId", solicitud.id)
+                                            .whereEqualTo("prestadorId", currentUserId)
+                                            .get()
+                                            .addOnSuccessListener { snapRaizProp ->
+                                                val docRaizProp = snapRaizProp.documents.firstOrNull()
+                                                if (!verificarYEstablecerDoc(docRaizProp)) {
+                                                    yaTienePropuestaActiva = false
+                                                }
+                                                cargandoEstadoPropuesta = false
+                                            }
+                                            .addOnFailureListener {
+                                                yaTienePropuestaActiva = false
+                                                cargandoEstadoPropuesta = false
+                                            }
+                                    }
+                                    .addOnFailureListener {
+                                        yaTienePropuestaActiva = false
+                                        cargandoEstadoPropuesta = false
+                                    }
+                            }
+                            .addOnFailureListener {
+                                yaTienePropuestaActiva = false
+                                cargandoEstadoPropuesta = false
+                            }
+                    }
+                    .addOnFailureListener {
+                        yaTienePropuestaActiva = false
+                        cargandoEstadoPropuesta = false
+                    }
+            }
+            .addOnFailureListener {
+                yaTienePropuestaActiva = false
+                cargandoEstadoPropuesta = false
+            }
     }
 
-    // Validación de estado general de la solicitud
-    val estadosInactivos = setOf(
+    val estadosInactivosSolicitud = setOf(
         "EN_PROCESO", "COMPLETADA", "COMPLETADO",
         "FINALIZADA", "FINALIZADO", "CANCELADA", "CANCELADO"
     )
-    val puedePostularse = solicitud.estado.uppercase() !in estadosInactivos
+    val puedePostularse = solicitud.estado.uppercase() !in estadosInactivosSolicitud
 
-    // MODALES
     if (mostrarModalResenas) {
         ClienteResenasDialog(
             clienteNombre = solicitud.clienteNombre.ifBlank { "Cliente ServixYa" },
@@ -277,7 +319,6 @@ fun DetalleSolicitudScreen(
             }
         },
         bottomBar = {
-            // Solo se muestra el botón si la solicitud admite postulación Y NO tiene una propuesta activa enviada
             if (puedePostularse && !yaTienePropuestaActiva && !cargandoEstadoPropuesta) {
                 Surface(
                     color = Color.White,
@@ -296,6 +337,11 @@ fun DetalleSolicitudScreen(
                                     Toast.makeText(context, "Escribe una breve descripción de tu propuesta", Toast.LENGTH_SHORT).show()
                                     return@Button
                                 }
+
+                                // Actualiza el estado local de inmediato al confirmar
+                                yaTienePropuestaActiva = true
+                                propuestaExistenteMonto = monto
+                                propuestaExistenteTexto = propuestaTexto.trim()
 
                                 onConfirmarPostulacion(monto, propuestaTexto.trim())
                             },
@@ -326,11 +372,10 @@ fun DetalleSolicitudScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. TARJETA CLIENTE
+            // TARJETA CLIENTE
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
                 border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -389,7 +434,6 @@ fun DetalleSolicitudScreen(
                         }
                     }
 
-                    // CHIP DE RATING CLICKEABLE
                     Surface(
                         color = Color(0xFFFFF8E1),
                         shape = RoundedCornerShape(20.dp),
@@ -424,11 +468,10 @@ fun DetalleSolicitudScreen(
                 }
             }
 
-            // 2. TARJETA ESPECIFICACIONES
+            // TARJETA ESPECIFICACIONES
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
                 border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -516,12 +559,11 @@ fun DetalleSolicitudScreen(
                 }
             }
 
-            // 3. MULTIMEDIA
+            // MULTIMEDIA
             if (solicitud.archivosUrls.isNotEmpty()) {
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
                     border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -591,12 +633,11 @@ fun DetalleSolicitudScreen(
                 }
             }
 
-            // 4. PROPUESTA, BLOQUEO DE PROPUESTA ACTIVA O BANNER DE ESTADO INACTIVO
+            // SECCIÓN DE PROPUESTA / AVISO DE PROPUESTA ENVIADA
             if (!puedePostularse) {
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Box(
@@ -635,7 +676,6 @@ fun DetalleSolicitudScreen(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFBEB)),
                     border = BorderStroke(1.dp, Color(0xFFFDE68A)),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -703,7 +743,7 @@ fun DetalleSolicitudScreen(
                         Spacer(modifier = Modifier.height(2.dp))
 
                         Text(
-                            text = "ℹ️ Ya enviaste una propuesta para esta solicitud. Solo podrás enviar una nueva propuesta dentro del chat si el cliente rechaza o cancela la oferta actual.",
+                            text = "ℹ️ Ya enviaste una propuesta para esta solicitud. No es necesario enviar otra oferta.",
                             fontSize = 12.sp,
                             color = Color(0xFFB45309),
                             lineHeight = 16.sp
@@ -714,7 +754,6 @@ fun DetalleSolicitudScreen(
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
                     border = BorderStroke(1.dp, Color(0xFFF1F5F9)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -886,23 +925,13 @@ private fun ClienteResenasDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = "💬",
-                                fontSize = 32.sp
-                            )
+                            Text(text = "💬", fontSize = 32.sp)
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
                                 text = "Aún no hay opiniones sobre este cliente",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF475569),
-                                textAlign = TextAlign.Center
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Sé el primero en calificarlo al completar un servicio.",
-                                fontSize = 12.sp,
-                                color = Color(0xFF94A3B8),
                                 textAlign = TextAlign.Center
                             )
                         }
@@ -925,44 +954,12 @@ private fun ClienteResenasDialog(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Surface(
-                                                modifier = Modifier.size(32.dp),
-                                                shape = CircleShape,
-                                                color = Color(0xFFE2E8F0)
-                                            ) {
-                                                if (resena.autorFotoUrl.isNotBlank()) {
-                                                    Image(
-                                                        painter = rememberAsyncImagePainter(model = resena.autorFotoUrl),
-                                                        contentDescription = null,
-                                                        contentScale = ContentScale.Crop,
-                                                        modifier = Modifier.fillMaxSize()
-                                                    )
-                                                } else {
-                                                    Box(
-                                                        contentAlignment = Alignment.Center,
-                                                        modifier = Modifier.fillMaxSize()
-                                                    ) {
-                                                        Text(
-                                                            text = resena.autorNombre.take(1).uppercase(),
-                                                            fontWeight = FontWeight.Bold,
-                                                            fontSize = 13.sp,
-                                                            color = Color(0xFF475569)
-                                                        )
-                                                    }
-                                                }
-                                            }
-
-                                            Text(
-                                                text = resena.autorNombre,
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color(0xFF0F172A)
-                                            )
-                                        }
+                                        Text(
+                                            text = resena.autorNombre,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF0F172A)
+                                        )
 
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Icon(
@@ -986,17 +983,9 @@ private fun ClienteResenasDialog(
                                         Text(
                                             text = resena.comentario,
                                             fontSize = 12.sp,
-                                            color = Color(0xFF334155),
-                                            lineHeight = 16.sp
+                                            color = Color(0xFF334155)
                                         )
                                     }
-
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        text = resena.fechaFormateada,
-                                        fontSize = 10.sp,
-                                        color = Color(0xFF94A3B8)
-                                    )
                                 }
                             }
                         }
@@ -1007,7 +996,7 @@ private fun ClienteResenasDialog(
     }
 }
 
-// DIÁLOGO VIDEO CON NOMBRE ÚNICO Y TIPO EXPLÍCITO
+// DIÁLOGOS MULTIMEDIA
 @Composable
 private fun SolicitudVideoPlayerDialog(
     videoUrl: String,
@@ -1055,7 +1044,6 @@ private fun SolicitudVideoPlayerDialog(
     }
 }
 
-// DIÁLOGO IMAGEN CON NOMBRE ÚNICO
 @Composable
 private fun SolicitudImageViewerDialog(
     imageUrl: String,

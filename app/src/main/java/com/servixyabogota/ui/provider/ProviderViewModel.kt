@@ -794,7 +794,8 @@ class ProviderViewModel : ViewModel() {
         db.collection("solicitudes").document(solicitudId).get()
             .addOnSuccessListener { document ->
                 if (document.exists()) {
-                    val solicitud = document.toObject(Solicitud::class.java)
+                    // Se agrega ?.copy(id = document.id) para asegurar que la solicitud lleve su ID real
+                    val solicitud = document.toObject(Solicitud::class.java)?.copy(id = document.id)
                     onResult(solicitud)
                 } else {
                     onResult(null)
