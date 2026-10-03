@@ -47,9 +47,13 @@ fun ProviderHistoryScreen(
 ) {
     var tabSeleccionada by remember { mutableIntStateOf(0) }
 
-    // Obtener únicamente los trabajos finalizados/completados
+    // Obtener trabajos finalizados/completados/calificados
     val trabajosCompletados = remember(historialReciente) {
-        historialReciente.filter { it.estado == "COMPLETADO" }
+        historialReciente.filter {
+            it.estado.equals("COMPLETADO", ignoreCase = true) ||
+                    it.estado.equals("CALIFICADO", ignoreCase = true) ||
+                    it.estado.equals("FINALIZADO", ignoreCase = true)
+        }
     }
 
     if (estaCargando && trabajosActivos.isEmpty() && historialReciente.isEmpty()) {
@@ -71,7 +75,6 @@ fun ProviderHistoryScreen(
             .statusBarsPadding(),
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
-        // --- CABECERA Y TABS ---
         item {
             Column(
                 modifier = Modifier
@@ -173,7 +176,6 @@ fun ProviderHistoryScreen(
         }
 
         if (tabSeleccionada == 0) {
-            // --- PESTAÑA 0: TRABAJOS ACEPTADOS ---
             item {
                 Text(
                     text = "TRABAJOS ACTUALES",
@@ -253,7 +255,6 @@ fun ProviderHistoryScreen(
                 }
             }
         } else {
-            // --- PESTAÑA 1: HISTORIAL COMPLETO DE TRABAJOS COMPLETADOS ---
             item {
                 Text(
                     text = "TRABAJOS COMPLETADOS",
@@ -427,9 +428,11 @@ private fun TrabajoHistorialCard(
     trabajo: TrabajoItemUI,
     onClick: () -> Unit
 ) {
-    val (badgeBg, badgeText) = when (trabajo.estado) {
-        "COMPLETADO" -> Color(0xFFDCFCE7) to Color(0xFF15803D)
+    val (badgeBg, badgeText) = when (trabajo.estado.uppercase()) {
+        "COMPLETADO", "FINALIZADO", "CALIFICADO" -> Color(0xFFDCFCE7) to Color(0xFF15803D)
         "POSTULADO" -> Color(0xFFFFEDD5) to Color(0xFFC2410C)
+        "RECHAZADO" -> Color(0xFFFEE2E2) to Color(0xFF991B1B)
+        "CANCELADO" -> Color(0xFFF3F4F6) to Color(0xFF374151)
         else -> Color(0xFFF3F4F6) to Color(0xFF4B5563)
     }
 

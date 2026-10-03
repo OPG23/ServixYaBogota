@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -29,7 +30,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// Modelo UI para las reseñas reales
 data class ReviewItem(
     val id: String = "",
     val nombre: String = "Cliente",
@@ -40,7 +40,6 @@ data class ReviewItem(
     val fechaObj: Date? = null
 )
 
-// Modelo UI para los chats directos recibidos por el prestador
 data class ProviderDirectChatUi(
     val id: String = "",
     val clienteId: String = "",
@@ -81,17 +80,14 @@ class ProviderViewModel : ViewModel() {
 
     private val repository: SolicitudRepository = SolicitudRepository()
 
-    // Propiedad pública para acceder al ID del prestador actual
     val prestadorId: String
         get() = auth.currentUser?.uid ?: ""
 
-    // ESTADO PARA CHATS DIRECTOS REALES
     var listaChatsDirectos by mutableStateOf<List<ProviderDirectChatUi>>(emptyList())
         private set
     var estaCargandoChats by mutableStateOf(false)
         private set
 
-    // ESTADO PARA RESEÑAS REALES DE FIRESTORE
     var listaResenasRecibidas by mutableStateOf<List<ReviewItem>>(emptyList())
         private set
     var listaResenasOtorgadas by mutableStateOf<List<ReviewItem>>(emptyList())
@@ -103,7 +99,6 @@ class ProviderViewModel : ViewModel() {
     var estaCargandoResenas by mutableStateOf(false)
         private set
 
-    // ESTADO DE MIS TRABAJOS Y POSTULACIONES REALES
     var listaMisTrabajosActivos by mutableStateOf<List<TrabajoItemUI>>(emptyList())
         private set
     var listaHistorialTrabajos by mutableStateOf<List<TrabajoItemUI>>(emptyList())
@@ -111,7 +106,8 @@ class ProviderViewModel : ViewModel() {
     var estaCargandoMisTrabajos by mutableStateOf(false)
         private set
 
-    // Referencias para cancelar suscripciones activas
+    // Referencias para escuchadores y caché en tiempo real
+    private val solicitudesCache = mutableMapOf<String, DocumentSnapshot>()
     private var misTrabajosGroupListener: ListenerRegistration? = null
     private val solicitudesListenersMap = mutableMapOf<String, ListenerRegistration>()
 
@@ -127,16 +123,13 @@ class ProviderViewModel : ViewModel() {
         misTrabajosGroupListener?.remove()
         solicitudesListenersMap.values.forEach { it.remove() }
         solicitudesListenersMap.clear()
+        solicitudesCache.clear()
     }
 
-    /**
-     * Escucha en tiempo real la reputación y las reseñas recibidas/otorgadas del prestador
-     */
     fun escucharResenas() {
         val uid = auth.currentUser?.uid ?: return
         estaCargandoResenas = true
 
-        // 1. Escuchar promedio de estrellas y total de reseñas desde el perfil del usuario
         db.collection("usuarios").document(uid)
             .addSnapshotListener { snapshot, _ ->
                 if (snapshot != null && snapshot.exists()) {
@@ -145,16 +138,10 @@ class ProviderViewModel : ViewModel() {
                 }
             }
 
-        // 2. Escuchar reseñas recibidas de clientes (tipo != PRESTADOR_A_CLIENTE)
         db.collection("resenas")
             .whereEqualTo("prestadorId", uid)
             .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    estaCargandoResenas = false
-                    return@addSnapshotListener
-                }
-
-                if (snapshot == null || snapshot.documents.isEmpty()) {
+                if (error != null || snapshot == null || snapshot.documents.isEmpty()) {
                     listaResenasRecibidas = emptyList()
                     estaCargandoResenas = false
                     return@addSnapshotListener
@@ -266,7 +253,6 @@ class ProviderViewModel : ViewModel() {
                 }
             }
 
-        // 3. Escuchar reseñas otorgadas por el prestador a clientes (autorId == uid)
         db.collection("resenas")
             .whereEqualTo("autorId", uid)
             .addSnapshotListener { snapshot, error ->
@@ -378,9 +364,6 @@ class ProviderViewModel : ViewModel() {
             }
     }
 
-    /**
-     * Escucha en tiempo real la colección "chats" en Firestore para el Prestador autenticado
-     */
     fun escucharChatsDirectos() {
         val uid = auth.currentUser?.uid ?: return
         estaCargandoChats = true
@@ -800,7 +783,10 @@ class ProviderViewModel : ViewModel() {
                     batch.set(primerMensajeRef, primerMensaje)
 
                     batch.commit()
-                        .addOnSuccessListener { onSuccess() }
+                        .addOnSuccessListener {
+                            escucharMisTrabajos()
+                            onSuccess()
+                        }
                         .addOnFailureListener { e -> onError(e.localizedMessage ?: "Error al enviar la postulación") }
                 }
                 .addOnFailureListener { e ->
@@ -830,20 +816,19 @@ class ProviderViewModel : ViewModel() {
     }
 
     /**
-     * Escucha en tiempo real las solicitudes asignadas y postuladas del prestador autenticado
+     * Escuchador global y reactivo en tiempo real para Postulados, Aceptados y Completados/Calificados
      */
     fun escucharMisTrabajos() {
         val uid = auth.currentUser?.uid ?: return
         estaCargandoMisTrabajos = true
 
         val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-        val estadosActivos = setOf("EN_PROCESO", "ACEPTADA", "ACEPTADO", "EN_CURSO", "EN PROCESO")
-        val estadosFinalizados = setOf("COMPLETADO", "COMPLETADA", "FINALIZADO", "FINALIZADA", "CALIFICADO", "CALIFICADA", "CANCELADO", "CANCELADA")
 
         // Limpiar escuchadores previos
         misTrabajosGroupListener?.remove()
         solicitudesListenersMap.values.forEach { it.remove() }
         solicitudesListenersMap.clear()
+        solicitudesCache.clear()
 
         misTrabajosGroupListener = db.collectionGroup("propuestas")
             .whereEqualTo("prestadorId", uid)
@@ -869,137 +854,143 @@ class ProviderViewModel : ViewModel() {
                     }
                 }
 
-                // Desuscribir solicitudes que ya no existen
                 val actualSolicitudIds = propuestasMap.keys
+
+                // Eliminar escuchadores de solicitudes obsoletas
                 val idsToRemove = solicitudesListenersMap.keys.filter { it !in actualSolicitudIds }
                 idsToRemove.forEach { id ->
                     solicitudesListenersMap[id]?.remove()
                     solicitudesListenersMap.remove(id)
+                    solicitudesCache.remove(id)
                 }
 
-                val mapaActivos = mutableMapOf<String, TrabajoItemUI>()
-                val mapaHistorial = mutableMapOf<String, TrabajoItemUI>()
+                // Función desacoplada para recalcular listas en tiempo real
+                fun procesarYRefrescar() {
+                    val activosTemp = mutableListOf<TrabajoItemUI>()
+                    val historialTemp = mutableListOf<TrabajoItemUI>()
 
-                fun refrescarUI() {
-                    listaMisTrabajosActivos = mapaActivos.values.toList()
-                    listaHistorialTrabajos = mapaHistorial.values.toList()
+                    val estadosActivos = setOf("EN_PROCESO", "ACEPTADA", "ACEPTADO", "EN_CURSO", "EN PROCESO")
+                    val estadosCompletados = setOf("COMPLETADO", "COMPLETADA", "FINALIZADO", "FINALIZADA", "CALIFICADO", "CALIFICADA")
+
+                    for ((solId, estProp) in propuestasMap) {
+                        val sDoc = solicitudesCache[solId] ?: continue
+                        val sol = sDoc.toObject(Solicitud::class.java)?.copy(id = sDoc.id) ?: continue
+
+                        val fechaFormateada = sol.fechaCreacion?.let { sdf.format(it) } ?: "Reciente"
+                        val estadoSolUpper = sol.estado.uppercase()
+
+                        val esPrestadorAsignado = sol.prestadorIdAsignado == uid ||
+                                sDoc.getString("prestadorId") == uid ||
+                                sDoc.getString("proveedorId") == uid
+
+                        // Verificación si el trabajo ya fue completado o calificado
+                        val esFinalizado = estadoSolUpper in estadosCompletados ||
+                                estProp in estadosCompletados ||
+                                sDoc.getBoolean("calificado") == true ||
+                                sDoc.getBoolean("prestadorCalifico") == true ||
+                                sDoc.get("calificacionCliente") != null ||
+                                sDoc.get("calificacionPrestador") != null
+
+                        val esTrabajoActivo = !esFinalizado &&
+                                (estadoSolUpper in estadosActivos || estProp in estadosActivos) &&
+                                (esPrestadorAsignado || estProp == "ACEPTADA" || estProp == "ACEPTADO")
+
+                        val fotoDirecta = sDoc.getString("clienteFotoUrl")
+                            ?: sDoc.getString("clienteFoto")
+                            ?: sDoc.getString("fotoUrl")
+                            ?: ""
+
+                        if (esTrabajoActivo) {
+                            activosTemp.add(
+                                TrabajoItemUI(
+                                    id = sol.id,
+                                    clienteId = sol.clienteId,
+                                    clienteNombre = sol.clienteNombre.ifBlank { "Cliente ServixYa" },
+                                    clienteFotoUrl = fotoDirecta,
+                                    titulo = sol.detalleProblema.ifBlank { sol.categoria },
+                                    localidad = sol.localidad,
+                                    direccion = sol.direccion,
+                                    estado = "ACEPTADO",
+                                    fecha = fechaFormateada,
+                                    subtituloEstado = "Trabajo en proceso"
+                                )
+                            )
+                        } else {
+                            val estadoMostrar = when {
+                                esFinalizado -> "COMPLETADO"
+                                estadoSolUpper in setOf("CANCELADO", "CANCELADA") || estProp in setOf("CANCELADO", "CANCELADA") -> "CANCELADO"
+                                estProp == "PENDIENTE" -> "POSTULADO"
+                                estProp in setOf("RECHAZADO", "RECHAZADA") -> "RECHAZADO"
+                                else -> estProp
+                            }
+
+                            val subtitulo = when (estadoMostrar) {
+                                "POSTULADO" -> "En espera de selección"
+                                "COMPLETADO" -> "Trabajo completado"
+                                "RECHAZADO" -> "Propuesta no seleccionada"
+                                "CANCELADO" -> "Solicitud cancelada"
+                                else -> null
+                            }
+
+                            historialTemp.add(
+                                TrabajoItemUI(
+                                    id = sol.id,
+                                    clienteId = sol.clienteId,
+                                    clienteNombre = sol.clienteNombre.ifBlank { "Cliente ServixYa" },
+                                    clienteFotoUrl = fotoDirecta,
+                                    titulo = sol.detalleProblema.ifBlank { sol.categoria },
+                                    localidad = sol.localidad,
+                                    direccion = sol.direccion,
+                                    estado = estadoMostrar,
+                                    fecha = fechaFormateada,
+                                    subtituloEstado = subtitulo
+                                )
+                            )
+                        }
+                    }
+
+                    listaMisTrabajosActivos = activosTemp
+                    listaHistorialTrabajos = historialTemp
                     estaCargandoMisTrabajos = false
+
+                    // Si falta la foto, se consulta de forma asíncrona al perfil del cliente
+                    val itemsSinFoto = (activosTemp + historialTemp).filter { it.clienteFotoUrl.isBlank() && it.clienteId.isNotBlank() }
+                    for (item in itemsSinFoto) {
+                        db.collection("usuarios").document(item.clienteId).get()
+                            .addOnSuccessListener { uDoc ->
+                                val fotoUser = uDoc.getString("fotoUrl")
+                                    ?: uDoc.getString("photoUrl")
+                                    ?: uDoc.getString("fotoPerfilUrl")
+                                    ?: ""
+                                if (fotoUser.isNotBlank()) {
+                                    listaMisTrabajosActivos = listaMisTrabajosActivos.map {
+                                        if (it.id == item.id) it.copy(clienteFotoUrl = fotoUser) else it
+                                    }
+                                    listaHistorialTrabajos = listaHistorialTrabajos.map {
+                                        if (it.id == item.id) it.copy(clienteFotoUrl = fotoUser) else it
+                                    }
+                                }
+                            }
+                    }
                 }
 
-                if (actualSolicitudIds.isEmpty()) {
-                    refrescarUI()
-                    return@addSnapshotListener
-                }
-
+                // Registrar escuchador activo para cada documento de solicitud
                 for (solicitudId in actualSolicitudIds) {
-                    val estadoPropuestActual = propuestasMap[solicitudId] ?: "PENDIENTE"
-
                     if (!solicitudesListenersMap.containsKey(solicitudId)) {
                         val listener = db.collection("solicitudes").document(solicitudId)
                             .addSnapshotListener { sDoc, sError ->
                                 if (sError != null || sDoc == null || !sDoc.exists()) {
-                                    mapaActivos.remove(solicitudId)
-                                    mapaHistorial.remove(solicitudId)
-                                    refrescarUI()
-                                    return@addSnapshotListener
+                                    solicitudesCache.remove(solicitudId)
+                                } else {
+                                    solicitudesCache[solicitudId] = sDoc
                                 }
-
-                                val sol = sDoc.toObject(Solicitud::class.java)?.copy(id = sDoc.id)
-                                if (sol != null) {
-                                    val fechaFormateada = sol.fechaCreacion?.let { sdf.format(it) } ?: "Reciente"
-                                    val estadoSolUpper = sol.estado.uppercase()
-
-                                    val esPrestadorAsignado = sol.prestadorIdAsignado == uid ||
-                                            sDoc.getString("prestadorId") == uid ||
-                                            sDoc.getString("proveedorId") == uid
-
-                                    val esFinalizado = estadoSolUpper in estadosFinalizados || estadoPropuestActual in estadosFinalizados
-
-                                    val esTrabajoActivo = !esFinalizado &&
-                                            (estadoSolUpper in estadosActivos || estadoPropuestActual in estadosActivos) &&
-                                            (esPrestadorAsignado || estadoPropuestActual == "ACEPTADA" || estadoPropuestActual == "ACEPTADO")
-
-                                    val fotoDirecta = sDoc.getString("clienteFotoUrl")
-                                        ?: sDoc.getString("clienteFoto")
-                                        ?: sDoc.getString("fotoUrl")
-                                        ?: ""
-
-                                    if (esTrabajoActivo) {
-                                        mapaHistorial.remove(solicitudId)
-                                        mapaActivos[solicitudId] = TrabajoItemUI(
-                                            id = sol.id,
-                                            clienteId = sol.clienteId,
-                                            clienteNombre = sol.clienteNombre.ifBlank { "Cliente ServixYa" },
-                                            clienteFotoUrl = fotoDirecta,
-                                            titulo = sol.detalleProblema.ifBlank { sol.categoria },
-                                            localidad = sol.localidad,
-                                            direccion = sol.direccion,
-                                            estado = "ACEPTADO",
-                                            fecha = fechaFormateada,
-                                            subtituloEstado = "Trabajo en proceso"
-                                        )
-                                    } else {
-                                        val estadoMostrar = when {
-                                            estadoSolUpper in setOf("COMPLETADO", "COMPLETADA", "FINALIZADO", "FINALIZADA", "CALIFICADO", "CALIFICADA") ||
-                                                    estadoPropuestActual in setOf("COMPLETADO", "COMPLETADA") -> "COMPLETADO"
-
-                                            estadoSolUpper in setOf("CANCELADO", "CANCELADA") ||
-                                                    estadoPropuestActual in setOf("CANCELADO", "CANCELADA") -> "CANCELADO"
-
-                                            estadoPropuestActual == "PENDIENTE" -> "POSTULADO"
-                                            estadoPropuestActual in setOf("RECHAZADO", "RECHAZADA") -> "RECHAZADO"
-                                            else -> estadoPropuestActual
-                                        }
-
-                                        val subtitulo = when (estadoMostrar) {
-                                            "POSTULADO" -> "En espera de selección"
-                                            "COMPLETADO" -> "Trabajo completado"
-                                            "RECHAZADO" -> "Propuesta no seleccionada"
-                                            "CANCELADO" -> "Solicitud cancelada"
-                                            else -> null
-                                        }
-
-                                        mapaActivos.remove(solicitudId)
-                                        mapaHistorial[solicitudId] = TrabajoItemUI(
-                                            id = sol.id,
-                                            clienteId = sol.clienteId,
-                                            clienteNombre = sol.clienteNombre.ifBlank { "Cliente ServixYa" },
-                                            clienteFotoUrl = fotoDirecta,
-                                            titulo = sol.detalleProblema.ifBlank { sol.categoria },
-                                            localidad = sol.localidad,
-                                            direccion = sol.direccion,
-                                            estado = estadoMostrar,
-                                            fecha = fechaFormateada,
-                                            subtituloEstado = subtitulo
-                                        )
-                                    }
-
-                                    // Si no trae la foto directamente en la solicitud, se obtiene de la colección del usuario cliente
-                                    if (fotoDirecta.isBlank() && sol.clienteId.isNotBlank()) {
-                                        db.collection("usuarios").document(sol.clienteId).get()
-                                            .addOnSuccessListener { uDoc ->
-                                                val fotoUser = uDoc.getString("fotoUrl")
-                                                    ?: uDoc.getString("photoUrl")
-                                                    ?: uDoc.getString("fotoPerfilUrl")
-                                                    ?: ""
-                                                if (fotoUser.isNotBlank()) {
-                                                    mapaActivos[solicitudId]?.let {
-                                                        mapaActivos[solicitudId] = it.copy(clienteFotoUrl = fotoUser)
-                                                    }
-                                                    mapaHistorial[solicitudId]?.let {
-                                                        mapaHistorial[solicitudId] = it.copy(clienteFotoUrl = fotoUser)
-                                                    }
-                                                    refrescarUI()
-                                                }
-                                            }
-                                    }
-
-                                    refrescarUI()
-                                }
+                                procesarYRefrescar()
                             }
                         solicitudesListenersMap[solicitudId] = listener
                     }
                 }
+
+                procesarYRefrescar()
             }
     }
 }
