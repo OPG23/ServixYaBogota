@@ -21,7 +21,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Work
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -210,10 +209,10 @@ fun ProviderDetailProfileScreen(
                     HorizontalDivider(color = Color(0xFFF1F5F9))
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Calificación y Experiencia
+                    // Calificación (Centrada)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceAround,
+                        horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         // Elemento Cliqueable para Reseñas
@@ -221,25 +220,13 @@ fun ProviderDetailProfileScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(12.dp))
                                 .clickable { onVerResenas() }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .padding(horizontal = 16.dp, vertical = 6.dp)
                         ) {
                             MetricItem(
                                 icon = Icons.Default.Star,
                                 iconColor = Color(0xFFF59E0B),
                                 valor = calificacionTexto,
                                 etiqueta = "${prestador.totalResenas} reseñas"
-                            )
-                        }
-
-                        // Elemento Informativo de Experiencia
-                        Box(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            MetricItem(
-                                icon = Icons.Default.Work,
-                                iconColor = Color(0xFF2563EB),
-                                valor = "${prestador.experienciaAnos} años",
-                                etiqueta = "Experiencia"
                             )
                         }
                     }
