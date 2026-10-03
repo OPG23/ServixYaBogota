@@ -16,15 +16,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 
 data class TrabajoItemUI(
     val id: String,
     val clienteId: String = "",
     val clienteNombre: String,
+    val clienteFotoUrl: String = "",
     val titulo: String,
     val localidad: String,
     val direccion: String = "",
@@ -323,19 +326,30 @@ private fun TrabajoActualCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFC7D2FE)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = trabajo.clienteNombre.take(1),
-                                color = Color(0xFF3730A3),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
+                        if (trabajo.clienteFotoUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = trabajo.clienteFotoUrl,
+                                contentDescription = "Foto de ${trabajo.clienteNombre}",
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape),
+                                contentScale = ContentScale.Crop
                             )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFC7D2FE)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = trabajo.clienteNombre.take(1).uppercase(),
+                                    color = Color(0xFF3730A3),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                            }
                         }
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(

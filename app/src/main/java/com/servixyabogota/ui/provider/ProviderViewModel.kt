@@ -13,6 +13,7 @@ import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.storage.FirebaseStorage
 import com.servixyabogota.data.model.Propuesta
@@ -110,11 +111,22 @@ class ProviderViewModel : ViewModel() {
     var estaCargandoMisTrabajos by mutableStateOf(false)
         private set
 
+    // Referencias para cancelar suscripciones activas
+    private var misTrabajosGroupListener: ListenerRegistration? = null
+    private val solicitudesListenersMap = mutableMapOf<String, ListenerRegistration>()
+
     init {
         cargarPerfil()
         escucharChatsDirectos()
         escucharResenas()
         escucharMisTrabajos()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        misTrabajosGroupListener?.remove()
+        solicitudesListenersMap.values.forEach { it.remove() }
+        solicitudesListenersMap.clear()
     }
 
     /**
@@ -828,7 +840,12 @@ class ProviderViewModel : ViewModel() {
         val estadosActivos = setOf("EN_PROCESO", "ACEPTADA", "ACEPTADO", "EN_CURSO", "EN PROCESO")
         val estadosFinalizados = setOf("COMPLETADO", "COMPLETADA", "FINALIZADO", "FINALIZADA", "CALIFICADO", "CALIFICADA", "CANCELADO", "CANCELADA")
 
-        db.collectionGroup("propuestas")
+        // Limpiar escuchadores previos
+        misTrabajosGroupListener?.remove()
+        solicitudesListenersMap.values.forEach { it.remove() }
+        solicitudesListenersMap.clear()
+
+        misTrabajosGroupListener = db.collectionGroup("propuestas")
             .whereEqualTo("prestadorId", uid)
             .addSnapshotListener { propSnapshot, error ->
                 if (error != null) {
@@ -843,47 +860,77 @@ class ProviderViewModel : ViewModel() {
                     return@addSnapshotListener
                 }
 
-                val activosTemp = mutableListOf<TrabajoItemUI>()
-                val historialTemp = mutableListOf<TrabajoItemUI>()
-                var pendientes = propSnapshot.documents.size
-
+                val propuestasMap = mutableMapOf<String, String>()
                 for (pDoc in propSnapshot.documents) {
                     val solicitudId = pDoc.reference.parent.parent?.id ?: ""
                     val estadoPropuesta = (pDoc.getString("estado") ?: "PENDIENTE").uppercase()
-
-                    if (solicitudId.isBlank()) {
-                        pendientes--
-                        if (pendientes == 0) {
-                            listaMisTrabajosActivos = activosTemp.distinctBy { it.id }
-                            listaHistorialTrabajos = historialTemp.distinctBy { it.id }
-                            estaCargandoMisTrabajos = false
-                        }
-                        continue
+                    if (solicitudId.isNotBlank()) {
+                        propuestasMap[solicitudId] = estadoPropuesta
                     }
+                }
 
-                    db.collection("solicitudes").document(solicitudId).get()
-                        .addOnSuccessListener { sDoc ->
-                            val sol = sDoc.toObject(Solicitud::class.java)?.copy(id = sDoc.id)
-                            if (sol != null) {
-                                val fechaFormateada = sol.fechaCreacion?.let { sdf.format(it) } ?: "Reciente"
-                                val estadoSolUpper = sol.estado.uppercase()
+                // Desuscribir solicitudes que ya no existen
+                val actualSolicitudIds = propuestasMap.keys
+                val idsToRemove = solicitudesListenersMap.keys.filter { it !in actualSolicitudIds }
+                idsToRemove.forEach { id ->
+                    solicitudesListenersMap[id]?.remove()
+                    solicitudesListenersMap.remove(id)
+                }
 
-                                val esPrestadorAsignado = sol.prestadorIdAsignado == uid ||
-                                        sDoc.getString("prestadorId") == uid ||
-                                        sDoc.getString("proveedorId") == uid
+                val mapaActivos = mutableMapOf<String, TrabajoItemUI>()
+                val mapaHistorial = mutableMapOf<String, TrabajoItemUI>()
 
-                                val esFinalizado = estadoSolUpper in estadosFinalizados || estadoPropuesta in estadosFinalizados
+                fun refrescarUI() {
+                    listaMisTrabajosActivos = mapaActivos.values.toList()
+                    listaHistorialTrabajos = mapaHistorial.values.toList()
+                    estaCargandoMisTrabajos = false
+                }
 
-                                val esTrabajoActivo = !esFinalizado &&
-                                        (estadoSolUpper in estadosActivos || estadoPropuesta in estadosActivos) &&
-                                        (esPrestadorAsignado || estadoPropuesta == "ACEPTADA" || estadoPropuesta == "ACEPTADO")
+                if (actualSolicitudIds.isEmpty()) {
+                    refrescarUI()
+                    return@addSnapshotListener
+                }
 
-                                if (esTrabajoActivo) {
-                                    activosTemp.add(
-                                        TrabajoItemUI(
+                for (solicitudId in actualSolicitudIds) {
+                    val estadoPropuestActual = propuestasMap[solicitudId] ?: "PENDIENTE"
+
+                    if (!solicitudesListenersMap.containsKey(solicitudId)) {
+                        val listener = db.collection("solicitudes").document(solicitudId)
+                            .addSnapshotListener { sDoc, sError ->
+                                if (sError != null || sDoc == null || !sDoc.exists()) {
+                                    mapaActivos.remove(solicitudId)
+                                    mapaHistorial.remove(solicitudId)
+                                    refrescarUI()
+                                    return@addSnapshotListener
+                                }
+
+                                val sol = sDoc.toObject(Solicitud::class.java)?.copy(id = sDoc.id)
+                                if (sol != null) {
+                                    val fechaFormateada = sol.fechaCreacion?.let { sdf.format(it) } ?: "Reciente"
+                                    val estadoSolUpper = sol.estado.uppercase()
+
+                                    val esPrestadorAsignado = sol.prestadorIdAsignado == uid ||
+                                            sDoc.getString("prestadorId") == uid ||
+                                            sDoc.getString("proveedorId") == uid
+
+                                    val esFinalizado = estadoSolUpper in estadosFinalizados || estadoPropuestActual in estadosFinalizados
+
+                                    val esTrabajoActivo = !esFinalizado &&
+                                            (estadoSolUpper in estadosActivos || estadoPropuestActual in estadosActivos) &&
+                                            (esPrestadorAsignado || estadoPropuestActual == "ACEPTADA" || estadoPropuestActual == "ACEPTADO")
+
+                                    val fotoDirecta = sDoc.getString("clienteFotoUrl")
+                                        ?: sDoc.getString("clienteFoto")
+                                        ?: sDoc.getString("fotoUrl")
+                                        ?: ""
+
+                                    if (esTrabajoActivo) {
+                                        mapaHistorial.remove(solicitudId)
+                                        mapaActivos[solicitudId] = TrabajoItemUI(
                                             id = sol.id,
                                             clienteId = sol.clienteId,
                                             clienteNombre = sol.clienteNombre.ifBlank { "Cliente ServixYa" },
+                                            clienteFotoUrl = fotoDirecta,
                                             titulo = sol.detalleProblema.ifBlank { sol.categoria },
                                             localidad = sol.localidad,
                                             direccion = sol.direccion,
@@ -891,33 +938,33 @@ class ProviderViewModel : ViewModel() {
                                             fecha = fechaFormateada,
                                             subtituloEstado = "Trabajo en proceso"
                                         )
-                                    )
-                                } else {
-                                    val estadoMostrar = when {
-                                        estadoSolUpper in setOf("COMPLETADO", "COMPLETADA", "FINALIZADO", "FINALIZADA", "CALIFICADO", "CALIFICADA") ||
-                                                estadoPropuesta in setOf("COMPLETADO", "COMPLETADA") -> "COMPLETADO"
+                                    } else {
+                                        val estadoMostrar = when {
+                                            estadoSolUpper in setOf("COMPLETADO", "COMPLETADA", "FINALIZADO", "FINALIZADA", "CALIFICADO", "CALIFICADA") ||
+                                                    estadoPropuestActual in setOf("COMPLETADO", "COMPLETADA") -> "COMPLETADO"
 
-                                        estadoSolUpper in setOf("CANCELADO", "CANCELADA") ||
-                                                estadoPropuesta in setOf("CANCELADO", "CANCELADA") -> "CANCELADO"
+                                            estadoSolUpper in setOf("CANCELADO", "CANCELADA") ||
+                                                    estadoPropuestActual in setOf("CANCELADO", "CANCELADA") -> "CANCELADO"
 
-                                        estadoPropuesta == "PENDIENTE" -> "POSTULADO"
-                                        estadoPropuesta in setOf("RECHAZADO", "RECHAZADA") -> "RECHAZADO"
-                                        else -> estadoPropuesta
-                                    }
+                                            estadoPropuestActual == "PENDIENTE" -> "POSTULADO"
+                                            estadoPropuestActual in setOf("RECHAZADO", "RECHAZADA") -> "RECHAZADO"
+                                            else -> estadoPropuestActual
+                                        }
 
-                                    val subtitulo = when (estadoMostrar) {
-                                        "POSTULADO" -> "En espera de selección"
-                                        "COMPLETADO" -> "Trabajo completado"
-                                        "RECHAZADO" -> "Propuesta no seleccionada"
-                                        "CANCELADO" -> "Solicitud cancelada"
-                                        else -> null
-                                    }
+                                        val subtitulo = when (estadoMostrar) {
+                                            "POSTULADO" -> "En espera de selección"
+                                            "COMPLETADO" -> "Trabajo completado"
+                                            "RECHAZADO" -> "Propuesta no seleccionada"
+                                            "CANCELADO" -> "Solicitud cancelada"
+                                            else -> null
+                                        }
 
-                                    historialTemp.add(
-                                        TrabajoItemUI(
+                                        mapaActivos.remove(solicitudId)
+                                        mapaHistorial[solicitudId] = TrabajoItemUI(
                                             id = sol.id,
                                             clienteId = sol.clienteId,
                                             clienteNombre = sol.clienteNombre.ifBlank { "Cliente ServixYa" },
+                                            clienteFotoUrl = fotoDirecta,
                                             titulo = sol.detalleProblema.ifBlank { sol.categoria },
                                             localidad = sol.localidad,
                                             direccion = sol.direccion,
@@ -925,25 +972,33 @@ class ProviderViewModel : ViewModel() {
                                             fecha = fechaFormateada,
                                             subtituloEstado = subtitulo
                                         )
-                                    )
+                                    }
+
+                                    // Si no trae la foto directamente en la solicitud, se obtiene de la colección del usuario cliente
+                                    if (fotoDirecta.isBlank() && sol.clienteId.isNotBlank()) {
+                                        db.collection("usuarios").document(sol.clienteId).get()
+                                            .addOnSuccessListener { uDoc ->
+                                                val fotoUser = uDoc.getString("fotoUrl")
+                                                    ?: uDoc.getString("photoUrl")
+                                                    ?: uDoc.getString("fotoPerfilUrl")
+                                                    ?: ""
+                                                if (fotoUser.isNotBlank()) {
+                                                    mapaActivos[solicitudId]?.let {
+                                                        mapaActivos[solicitudId] = it.copy(clienteFotoUrl = fotoUser)
+                                                    }
+                                                    mapaHistorial[solicitudId]?.let {
+                                                        mapaHistorial[solicitudId] = it.copy(clienteFotoUrl = fotoUser)
+                                                    }
+                                                    refrescarUI()
+                                                }
+                                            }
+                                    }
+
+                                    refrescarUI()
                                 }
                             }
-
-                            pendientes--
-                            if (pendientes == 0) {
-                                listaMisTrabajosActivos = activosTemp.distinctBy { it.id }
-                                listaHistorialTrabajos = historialTemp.distinctBy { it.id }
-                                estaCargandoMisTrabajos = false
-                            }
-                        }
-                        .addOnFailureListener {
-                            pendientes--
-                            if (pendientes == 0) {
-                                listaMisTrabajosActivos = activosTemp.distinctBy { it.id }
-                                listaHistorialTrabajos = historialTemp.distinctBy { it.id }
-                                estaCargandoMisTrabajos = false
-                            }
-                        }
+                        solicitudesListenersMap[solicitudId] = listener
+                    }
                 }
             }
     }
