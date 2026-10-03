@@ -826,6 +826,7 @@ class ProviderViewModel : ViewModel() {
 
         val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
         val estadosActivos = setOf("EN_PROCESO", "ACEPTADA", "ACEPTADO", "EN_CURSO", "EN PROCESO")
+        val estadosFinalizados = setOf("COMPLETADO", "COMPLETADA", "FINALIZADO", "FINALIZADA", "CALIFICADO", "CALIFICADA", "CANCELADO", "CANCELADA")
 
         db.collectionGroup("propuestas")
             .whereEqualTo("prestadorId", uid)
@@ -871,7 +872,10 @@ class ProviderViewModel : ViewModel() {
                                         sDoc.getString("prestadorId") == uid ||
                                         sDoc.getString("proveedorId") == uid
 
-                                val esTrabajoActivo = (estadoSolUpper in estadosActivos || estadoPropuesta in estadosActivos) &&
+                                val esFinalizado = estadoSolUpper in estadosFinalizados || estadoPropuesta in estadosFinalizados
+
+                                val esTrabajoActivo = !esFinalizado &&
+                                        (estadoSolUpper in estadosActivos || estadoPropuesta in estadosActivos) &&
                                         (esPrestadorAsignado || estadoPropuesta == "ACEPTADA" || estadoPropuesta == "ACEPTADO")
 
                                 if (esTrabajoActivo) {
@@ -889,14 +893,23 @@ class ProviderViewModel : ViewModel() {
                                         )
                                     )
                                 } else {
-                                    val estadoMostrar = when (estadoPropuesta) {
-                                        "PENDIENTE" -> "POSTULADO"
+                                    val estadoMostrar = when {
+                                        estadoSolUpper in setOf("COMPLETADO", "COMPLETADA", "FINALIZADO", "FINALIZADA", "CALIFICADO", "CALIFICADA") ||
+                                                estadoPropuesta in setOf("COMPLETADO", "COMPLETADA") -> "COMPLETADO"
+
+                                        estadoSolUpper in setOf("CANCELADO", "CANCELADA") ||
+                                                estadoPropuesta in setOf("CANCELADO", "CANCELADA") -> "CANCELADO"
+
+                                        estadoPropuesta == "PENDIENTE" -> "POSTULADO"
+                                        estadoPropuesta in setOf("RECHAZADO", "RECHAZADA") -> "RECHAZADO"
                                         else -> estadoPropuesta
                                     }
-                                    val subtitulo = when (estadoPropuesta) {
-                                        "PENDIENTE" -> "En espera de selección"
-                                        "COMPLETADO", "COMPLETADA" -> "Trabajo completado"
-                                        "RECHAZADO", "RECHAZADA" -> "Propuesta no seleccionada"
+
+                                    val subtitulo = when (estadoMostrar) {
+                                        "POSTULADO" -> "En espera de selección"
+                                        "COMPLETADO" -> "Trabajo completado"
+                                        "RECHAZADO" -> "Propuesta no seleccionada"
+                                        "CANCELADO" -> "Solicitud cancelada"
                                         else -> null
                                     }
 
