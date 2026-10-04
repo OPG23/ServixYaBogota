@@ -24,6 +24,49 @@ class AdminRepository {
         private const val USERS_COLLECTION = "usuarios"
     }
 
+    /**
+     * Obtiene todos los usuarios registrados en Firestore.
+     */
+    suspend fun obtenerTodosUsuarios(): Result<List<Map<String, Any>>> {
+        return try {
+            val snapshot = firestore.collection(USERS_COLLECTION).get().await()
+            val usuarios = snapshot.documents.map { doc ->
+                val data = doc.data?.toMutableMap() ?: mutableMapOf()
+                data["uid"] = doc.id
+                data
+            }
+            Result.success(usuarios)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Cambia el estado de verificación/acceso de un usuario (APROBADO, DESHABILITADO, etc.)
+     */
+    suspend fun cambiarEstadoUsuario(uid: String, nuevoEstado: String): Result<Boolean> {
+        return try {
+            firestore.collection(USERS_COLLECTION).document(uid)
+                .set(mapOf("estadoVerificacion" to nuevoEstado), SetOptions.merge())
+                .await()
+            Result.success(true)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Elimina el documento del usuario de la colección usuarios.
+     */
+    suspend fun eliminarUsuario(uid: String): Result<Boolean> {
+        return try {
+            firestore.collection(USERS_COLLECTION).document(uid).delete().await()
+            Result.success(true)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun obtenerSolicitudesPendientes(): Result<List<SolicitudVerificacion>> {
         return try {
             val snapshot = firestore.collection(USERS_COLLECTION)

@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -23,8 +24,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Locale
 
 // ==========================================
 // MODELOS DE DATOS Y ESTADOS
@@ -51,7 +55,8 @@ data class UsuarioAdmin(
     val fotoUrl: String?,
     val rol: RolUsuario,
     val estado: EstadoVerificacion,
-    val calificacion: Double
+    val calificacion: Double,
+    val fechaRegistroMs: Long = 0L
 )
 
 // ==========================================
@@ -61,40 +66,40 @@ data class UsuarioAdmin(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdminUsersScreen(
+    viewModel: AdminViewModel = viewModel(),
     onNavigateToHome: () -> Unit = {},
     onVerDetalleUsuario: (UsuarioAdmin) -> Unit = {}
 ) {
     val context = LocalContext.current
 
-    // Datos simulados iniciales
-    val listaUsuariosMock = remember {
-        mutableStateListOf(
-            UsuarioAdmin("1", "María López", "maria@mail.com", "1012345678", "https://i.pravatar.cc/150?img=47", RolUsuario.CLIENTE, EstadoVerificacion.VERIFICADO, 4.8),
-            UsuarioAdmin("2", "Carlos Herrera", "carlos@mail.com", "1098765432", "https://i.pravatar.cc/150?img=12", RolUsuario.PRESTADOR, EstadoVerificacion.VERIFICADO, 4.5),
-            UsuarioAdmin("3", "Ana Gutiérrez", "ana@mail.com", "1023456789", "https://i.pravatar.cc/150?img=32", RolUsuario.CLIENTE, EstadoVerificacion.DESHABILITADO, 4.2),
-            UsuarioAdmin("4", "Javier Ramírez", "javier@mail.com", "1034567890", "https://i.pravatar.cc/150?img=60", RolUsuario.PRESTADOR, EstadoVerificacion.PENDIENTE, 4.9),
-            UsuarioAdmin("5", "Laura Gómez", "laura@mail.com", "1045678901", "https://i.pravatar.cc/150?img=5", RolUsuario.CLIENTE, EstadoVerificacion.VERIFICADO, 3.8)
-        )
+    // Cargar datos al entrar a la pantalla
+    LaunchedEffect(Unit) {
+        viewModel.cargarUsuarios()
     }
+
+    val listaUsuariosReal by viewModel.usuarios.observeAsState(initial = emptyList())
+    val isLoading by viewModel.isLoading.observeAsState(initial = false)
 
     // Estados de Filtros
     var searchQuery by remember { mutableStateOf("") }
     var tabSeleccionado by remember { mutableStateOf(RolUsuario.TODOS) }
-    var filtrosAvanzadosExpandidos by remember { mutableStateOf(true) }
+    var filtrosAvanzadosExpandidos by remember { mutableStateOf(false) }
 
     var rolFiltro by remember { mutableStateOf(RolUsuario.TODOS) }
-    var estadoVerificacionFiltro by remember { mutableStateOf(EstadoVerificacion.VERIFICADO) }
+    var estadoVerificacionFiltro by remember { mutableStateOf(EstadoVerificacion.TODOS) }
     var rangoCalificacion by remember { mutableStateOf(1.0f..5.0f) }
     var fechaDesde by remember { mutableStateOf("") }
     var fechaHasta by remember { mutableStateOf("") }
 
     // Conteo para las pestañas superiores
-    val totalTodos = listaUsuariosMock.size
-    val totalClientes = listaUsuariosMock.count { it.rol == RolUsuario.CLIENTE }
-    val totalPrestadores = listaUsuariosMock.count { it.rol == RolUsuario.PRESTADOR }
+    val totalTodos = listaUsuariosReal.size
+    val totalClientes = listaUsuariosReal.count { it.rol == RolUsuario.CLIENTE }
+    val totalPrestadores = listaUsuariosReal.count { it.rol == RolUsuario.PRESTADOR }
 
-    // Filtrado en tiempo real
-    val usuariosFiltrados = listaUsuariosMock.filter { user ->
+    val simpleDateFormat = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
+
+    // Filtrado en tiempo real sobre los datos de Firestore
+    val usuariosFiltrados = listaUsuariosReal.filter { user ->
         val coincideBusqueda = user.nombre.contains(searchQuery, ignoreCase = true) ||
                 user.correo.contains(searchQuery, ignoreCase = true) ||
                 user.cedula.contains(searchQuery)
@@ -111,7 +116,22 @@ fun AdminUsersScreen(
 
         val coincideCalificacion = user.calificacion >= rangoCalificacion.start && user.calificacion <= rangoCalificacion.endInclusive
 
-        coincideBusqueda && coincideTab && coincideRolAvanzado && coincideEstado && coincideCalificacion
+        val coincideFecha = try {
+            var valid = true
+            if (fechaDesde.isNotBlank() && user.fechaRegistroMs > 0) {
+                val desdeTime = simpleDateFormat.parse(fechaDesde)?.time ?: 0L
+                if (user.fechaRegistroMs < desdeTime) valid = false
+            }
+            if (fechaHasta.isNotBlank() && user.fechaRegistroMs > 0) {
+                val hastaTime = (simpleDateFormat.parse(fechaHasta)?.time ?: Long.MAX_VALUE) + 86400000L
+                if (user.fechaRegistroMs > hastaTime) valid = false
+            }
+            valid
+        } catch (e: Exception) {
+            true
+        }
+
+        coincideBusqueda && coincideTab && coincideRolAvanzado && coincideEstado && coincideCalificacion && coincideFecha
     }
 
     Scaffold(
@@ -193,50 +213,66 @@ fun AdminUsersScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Lista Scrolleable con los Filtros y los Usuarios
-            LazyColumn(
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                // Card de Filtros Avanzados
-                item {
-                    FiltrosAvanzadosCard(
-                        isExpanded = filtrosAvanzadosExpandidos,
-                        onToggleExpand = { filtrosAvanzadosExpandidos = !filtrosAvanzadosExpandidos },
-                        rolSeleccionado = rolFiltro,
-                        onRolSelected = { rolFiltro = it },
-                        estadoSeleccionado = estadoVerificacionFiltro,
-                        onEstadoSelected = { estadoVerificacionFiltro = it },
-                        rangoCalificacion = rangoCalificacion,
-                        onRangoCalificacionChanged = { rangoCalificacion = it },
-                        fechaDesde = fechaDesde,
-                        onFechaDesdeChanged = { fechaDesde = it },
-                        fechaHasta = fechaHasta,
-                        onFechaHastaChanged = { fechaHasta = it }
-                    )
+            if (isLoading && listaUsuariosReal.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Color(0xFF1976D2))
                 }
+            } else {
+                // Lista Scrolleable con los Filtros y los Usuarios Reales
+                LazyColumn(
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    // Card de Filtros Avanzados
+                    item {
+                        FiltrosAvanzadosCard(
+                            isExpanded = filtrosAvanzadosExpandidos,
+                            onToggleExpand = { filtrosAvanzadosExpandidos = !filtrosAvanzadosExpandidos },
+                            rolSeleccionado = rolFiltro,
+                            onRolSelected = { rolFiltro = it },
+                            estadoSeleccionado = estadoVerificacionFiltro,
+                            onEstadoSelected = { estadoVerificacionFiltro = it },
+                            rangoCalificacion = rangoCalificacion,
+                            onRangoCalificacionChanged = { rangoCalificacion = it },
+                            fechaDesde = fechaDesde,
+                            onFechaDesdeChanged = { fechaDesde = it },
+                            fechaHasta = fechaHasta,
+                            onFechaHastaChanged = { fechaHasta = it }
+                        )
+                    }
 
-                // Elementos de la lista de usuarios
-                items(usuariosFiltrados, key = { it.id }) { usuario ->
-                    UsuarioItemCard(
-                        usuario = usuario,
-                        onClick = { onVerDetalleUsuario(usuario) },
-                        onToggleEstado = {
-                            val index = listaUsuariosMock.indexOfFirst { it.id == usuario.id }
-                            if (index != -1) {
+                    if (usuariosFiltrados.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 40.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("No se encontraron usuarios", color = Color.Gray, fontSize = 14.sp)
+                            }
+                        }
+                    }
+
+                    // Elementos reales de la lista
+                    items(usuariosFiltrados, key = { it.id }) { usuario ->
+                        UsuarioItemCard(
+                            usuario = usuario,
+                            onClick = { onVerDetalleUsuario(usuario) },
+                            onToggleEstado = {
                                 val nuevoEstado = if (usuario.estado == EstadoVerificacion.DESHABILITADO) {
                                     EstadoVerificacion.VERIFICADO
                                 } else {
                                     EstadoVerificacion.DESHABILITADO
                                 }
-                                listaUsuariosMock[index] = usuario.copy(estado = nuevoEstado)
+                                viewModel.cambiarEstadoUsuario(usuario.id, nuevoEstado)
+                            },
+                            onEliminar = {
+                                viewModel.eliminarUsuario(usuario.id)
                             }
-                        },
-                        onEliminar = {
-                            listaUsuariosMock.removeIf { it.id == usuario.id }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
@@ -295,12 +331,11 @@ private fun FiltrosAvanzadosCard(
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF3F4F6)),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Header del Acordeón
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -333,7 +368,7 @@ private fun FiltrosAvanzadosCard(
             if (isExpanded) {
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 1. FILTRO DE ROL (RADIO BUTTONS)
+                // 1. FILTRO DE ROL
                 Text(
                     text = "ROL",
                     fontSize = 11.sp,
@@ -366,7 +401,7 @@ private fun FiltrosAvanzadosCard(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // 2. FILTRO DE ESTADO DE VERIFICACIÓN (DROPDOWN)
+                // 2. FILTRO DE ESTADO
                 Text(
                     text = "ESTADO DE VERIFICACIÓN",
                     fontSize = 11.sp,
@@ -387,7 +422,7 @@ private fun FiltrosAvanzadosCard(
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedEstadoDropdown) },
                         shape = RoundedCornerShape(10.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedBorderColor = Color(0xFFE5E7EB),
+                            unfocusedBorderColor = Color(0xFFE5E5E5),
                             focusedBorderColor = Color(0xFF1976D2)
                         ),
                         modifier = Modifier
@@ -413,7 +448,7 @@ private fun FiltrosAvanzadosCard(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 3. FILTRO DE CALIFICACIÓN PROMEDIO (RANGE SLIDER)
+                // 3. RANGOS DE CALIFICACIÓN
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -447,7 +482,7 @@ private fun FiltrosAvanzadosCard(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // 4. FECHA DE REGISTRO (DESDE / HASTA)
+                // 4. FECHA DE REGISTRO
                 Text(
                     text = "FECHA DE REGISTRO",
                     fontSize = 11.sp,
@@ -556,7 +591,7 @@ private fun UsuarioItemCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             AsyncImage(
-                model = usuario.fotoUrl ?: "https://via.placeholder.com/150",
+                model = if (!usuario.fotoUrl.isNullBlanks()) usuario.fotoUrl else "https://via.placeholder.com/150",
                 contentDescription = usuario.nombre,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -626,7 +661,7 @@ private fun UsuarioItemCard(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = usuario.calificacion.toString(),
+                    text = "%.1f".format(usuario.calificacion),
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
                     color = Color(0xFF374151)
@@ -685,3 +720,4 @@ private fun UsuarioItemCard(
     }
 }
 
+private fun String?.isNullBlanks(): Boolean = this == null || this.isBlank()

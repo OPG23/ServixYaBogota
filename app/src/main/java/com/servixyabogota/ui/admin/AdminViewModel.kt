@@ -5,6 +5,7 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.firestore.FirebaseFirestore
+import com.servixyabogota.data.repository.AdminRepository
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -25,16 +26,21 @@ data class SolicitudPrestador(
 
 class AdminViewModel : ViewModel() {
 
+    private val repository = AdminRepository()
     private val db = FirebaseFirestore.getInstance()
 
     private val _solicitudes = MutableLiveData<List<SolicitudPrestador>>(emptyList())
     val solicitudes: LiveData<List<SolicitudPrestador>> = _solicitudes
+
+    private val _usuarios = MutableLiveData<List<UsuarioAdmin>>(emptyList())
+    val usuarios: LiveData<List<UsuarioAdmin>> = _usuarios
 
     private val _isLoading = MutableLiveData(false)
     val isLoading: LiveData<Boolean> = _isLoading
 
     init {
         cargarSolicitudes()
+        cargarUsuarios()
     }
 
     fun cargarSolicitudes() {
@@ -66,10 +72,94 @@ class AdminViewModel : ViewModel() {
                 }
 
                 _solicitudes.value = lista.sortedByDescending { it.fechaEnvioDocumentos }
-                _isLoading.value = false
             } catch (e: Exception) {
                 e.printStackTrace()
+            } finally {
                 _isLoading.value = false
+            }
+        }
+    }
+
+    fun cargarUsuarios() {
+        _isLoading.value = true
+        viewModelScope.launch {
+            try {
+                val result = repository.obtenerTodosUsuarios()
+                result.onSuccess { rawList ->
+                    val listaMappeada = rawList.mapNotNull { map ->
+                        val uid = map["uid"] as? String ?: return@mapNotNull null
+                        val nombre = map["nombre"] as? String ?: ""
+                        val apellido = map["apellido"] as? String ?: ""
+                        val nombreCompleto = map["nombreCompleto"] as? String
+                            ?: if (apellido.isNotBlank()) "$nombre $apellido".trim() else nombre.ifEmpty { "Usuario" }
+
+                        val email = map["email"] as? String ?: map["correo"] as? String ?: ""
+                        val cedula = map["cedula"] as? String ?: map["numeroCedula"] as? String ?: ""
+                        val fotoUrl = map["fotoUrl"] as? String ?: map["foto"] as? String
+
+                        val rolStr = (map["rol"] as? String ?: "cliente").lowercase()
+                        val rolEnum = when (rolStr) {
+                            "prestador" -> RolUsuario.PRESTADOR
+                            else -> RolUsuario.CLIENTE
+                        }
+
+                        val estadoStr = map["estadoVerificacion"] as? String ?: "APROBADO"
+                        val estadoEnum = when (estadoStr) {
+                            "DESHABILITADO", "RECHAZADO" -> EstadoVerificacion.DESHABILITADO
+                            "PENDIENTE_VERIFICACION", "PENDIENTE" -> EstadoVerificacion.PENDIENTE
+                            else -> EstadoVerificacion.VERIFICADO
+                        }
+
+                        val calificacion = (map["calificacion"] as? Number)?.toDouble()
+                            ?: (map["calificacionPromedio"] as? Number)?.toDouble()
+                            ?: 5.0
+
+                        val fechaMs = (map["fechaActualizacion"] as? Number)?.toLong()
+                            ?: (map["fechaCreacion"] as? Number)?.toLong()
+                            ?: 0L
+
+                        UsuarioAdmin(
+                            id = uid,
+                            nombre = nombreCompleto,
+                            correo = email,
+                            cedula = cedula,
+                            fotoUrl = fotoUrl,
+                            rol = rolEnum,
+                            estado = estadoEnum,
+                            calificacion = calificacion,
+                            fechaRegistroMs = fechaMs
+                        )
+                    }
+                    _usuarios.value = listaMappeada
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun cambiarEstadoUsuario(uid: String, nuevoEstado: EstadoVerificacion) {
+        viewModelScope.launch {
+            val dbEstado = when (nuevoEstado) {
+                EstadoVerificacion.VERIFICADO -> "APROBADO"
+                EstadoVerificacion.DESHABILITADO -> "DESHABILITADO"
+                EstadoVerificacion.PENDIENTE -> "PENDIENTE_VERIFICACION"
+                EstadoVerificacion.TODOS -> "APROBADO"
+            }
+            val result = repository.cambiarEstadoUsuario(uid, dbEstado)
+            if (result.isSuccess) {
+                cargarUsuarios()
+            }
+        }
+    }
+
+    fun eliminarUsuario(uid: String) {
+        viewModelScope.launch {
+            val result = repository.eliminarUsuario(uid)
+            if (result.isSuccess) {
+                cargarUsuarios()
             }
         }
     }
@@ -84,6 +174,7 @@ class AdminViewModel : ViewModel() {
                 )
                 db.collection("usuarios").document(uid).update(updates).await()
                 cargarSolicitudes()
+                cargarUsuarios()
                 onSuccess()
             } catch (e: Exception) {
                 onError(e.localizedMessage ?: "Error al aprobar")
@@ -95,7 +186,7 @@ class AdminViewModel : ViewModel() {
         uid: String,
         motivo: String,
         justificacion: String,
-        documentosRechazados: List<String>, // <-- AGREGAR ESTE PARÁMETRO
+        documentosRechazados: List<String>,
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
@@ -105,12 +196,13 @@ class AdminViewModel : ViewModel() {
                     "estadoVerificacion" to "RECHAZADO",
                     "motivoRechazo" to motivo,
                     "justificacionRechazo" to justificacion,
-                    "documentosRechazados" to documentosRechazados, // <-- Guardar en Firestore
+                    "documentosRechazados" to documentosRechazados,
                     "fechaActualizacion" to System.currentTimeMillis()
                 )
 
                 db.collection("usuarios").document(uid).update(updates).await()
-                cargarSolicitudes() // Recarga la lista local de solicitudes
+                cargarSolicitudes()
+                cargarUsuarios()
                 onSuccess()
             } catch (e: Exception) {
                 onError(e.localizedMessage ?: "Error al procesar el rechazo")
