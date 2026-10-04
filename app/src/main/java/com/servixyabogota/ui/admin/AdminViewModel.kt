@@ -88,6 +88,11 @@ class AdminViewModel : ViewModel() {
                 result.onSuccess { rawList ->
                     val listaMappeada = rawList.mapNotNull { map ->
                         val uid = map["uid"] as? String ?: return@mapNotNull null
+                        val rolStr = (map["rol"] as? String ?: "cliente").lowercase()
+
+                        // 1. EXCLUIR ADMINISTRADORES
+                        if (rolStr == "admin") return@mapNotNull null
+
                         val nombre = map["nombre"] as? String ?: ""
                         val apellido = map["apellido"] as? String ?: ""
                         val nombreCompleto = map["nombreCompleto"] as? String
@@ -97,22 +102,29 @@ class AdminViewModel : ViewModel() {
                         val cedula = map["cedula"] as? String ?: map["numeroCedula"] as? String ?: ""
                         val fotoUrl = map["fotoUrl"] as? String ?: map["foto"] as? String
 
-                        val rolStr = (map["rol"] as? String ?: "cliente").lowercase()
                         val rolEnum = when (rolStr) {
                             "prestador" -> RolUsuario.PRESTADOR
                             else -> RolUsuario.CLIENTE
                         }
 
-                        val estadoStr = map["estadoVerificacion"] as? String ?: "APROBADO"
+                        // 3. ESTADO NO VERIFICADO POR DEFECTO PARA USUARIOS NUEVOS
+                        val estadoStr = (map["estadoVerificacion"] as? String ?: "NO_VERIFICADO").uppercase()
                         val estadoEnum = when (estadoStr) {
-                            "DESHABILITADO", "RECHAZADO" -> EstadoVerificacion.DESHABILITADO
+                            "APROBADO", "VERIFICADO" -> EstadoVerificacion.VERIFICADO
+                            "DESHABILITADO" -> EstadoVerificacion.DESHABILITADO
                             "PENDIENTE_VERIFICACION", "PENDIENTE" -> EstadoVerificacion.PENDIENTE
-                            else -> EstadoVerificacion.VERIFICADO
+                            else -> EstadoVerificacion.NO_VERIFICADO // "NO_VERIFICADO", "NO_ENVIADO", o vacíos
                         }
 
-                        val calificacion = (map["calificacion"] as? Number)?.toDouble()
+                        // 2. CALIFICACIÓN NULL SI NO TIENE
+                        val calificacionRaw = (map["calificacion"] as? Number)?.toDouble()
                             ?: (map["calificacionPromedio"] as? Number)?.toDouble()
-                            ?: 5.0
+
+                        val calificacionFinal = if (calificacionRaw != null && calificacionRaw > 0.0) {
+                            calificacionRaw
+                        } else {
+                            null // Permite mostrar "-.-" en la interfaz
+                        }
 
                         val fechaMs = (map["fechaActualizacion"] as? Number)?.toLong()
                             ?: (map["fechaCreacion"] as? Number)?.toLong()
@@ -126,7 +138,7 @@ class AdminViewModel : ViewModel() {
                             fotoUrl = fotoUrl,
                             rol = rolEnum,
                             estado = estadoEnum,
-                            calificacion = calificacion,
+                            calificacion = calificacionFinal,
                             fechaRegistroMs = fechaMs
                         )
                     }
@@ -144,6 +156,7 @@ class AdminViewModel : ViewModel() {
         viewModelScope.launch {
             val dbEstado = when (nuevoEstado) {
                 EstadoVerificacion.VERIFICADO -> "APROBADO"
+                EstadoVerificacion.NO_VERIFICADO -> "NO_VERIFICADO"
                 EstadoVerificacion.DESHABILITADO -> "DESHABILITADO"
                 EstadoVerificacion.PENDIENTE -> "PENDIENTE_VERIFICACION"
                 EstadoVerificacion.TODOS -> "APROBADO"

@@ -7,7 +7,7 @@ import androidx.activity.viewModels
 import androidx.compose.runtime.*
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
-import com.servixyabogota.ui.admin.AdminUsersScreen
+import com.servixyabogota.ui.admin.AdminUsersContainer
 import com.servixyabogota.ui.admin.AdminVerificationScreen
 import com.servixyabogota.ui.admin.AdminViewModel
 import com.servixyabogota.ui.auth.AuthViewModel
@@ -81,11 +81,9 @@ class MainActivity : ComponentActivity() {
 
                     // PANTALLA DE GESTIÓN DE USUARIOS (ADMIN)
                     "admin_users" -> {
-                        AdminUsersScreen(
-                            onNavigateToHome = { currentScreen = "home_admin" },
-                            onVerDetalleUsuario = { _ ->
-                                // Detalle de usuario cuando crees esa vista
-                            }
+                        AdminUsersContainer(
+                            viewModel = adminViewModel,
+                            onNavigateToHome = { currentScreen = "home_admin" }
                         )
                     }
 

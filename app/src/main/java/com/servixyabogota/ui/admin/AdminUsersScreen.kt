@@ -43,6 +43,7 @@ enum class RolUsuario(val label: String) {
 enum class EstadoVerificacion(val label: String, val badgeColor: Color, val textColor: Color) {
     TODOS("Todos", Color.Transparent, Color.Unspecified),
     VERIFICADO("VERIFICADO", Color(0xFFDCFCE7), Color(0xFF15803D)),
+    NO_VERIFICADO("NO VERIFICADO", Color(0xFFF3F4F6), Color(0xFF4B5563)),
     DESHABILITADO("DESHABILITADO", Color(0xFFFEE2E2), Color(0xFFB91C1C)),
     PENDIENTE("PENDIENTE", Color(0xFFFEF3C7), Color(0xFFB45309))
 }
@@ -55,12 +56,61 @@ data class UsuarioAdmin(
     val fotoUrl: String?,
     val rol: RolUsuario,
     val estado: EstadoVerificacion,
-    val calificacion: Double,
+    val calificacion: Double?, // Permite ser nulo si no tiene calificaciones
     val fechaRegistroMs: Long = 0L
 )
 
 // ==========================================
-// COMPOSABLE PRINCIPAL
+// CONTENEDOR PRINCIPAL (NAVEGACIÓN INTERNA)
+// ==========================================
+
+@Composable
+fun AdminUsersContainer(
+    viewModel: AdminViewModel = viewModel(),
+    onNavigateToHome: () -> Unit = {}
+) {
+    // Estado para controlar qué usuario se seleccionó para ver su detalle
+    var usuarioSeleccionado by remember { mutableStateOf<UsuarioAdmin?>(null) }
+
+    if (usuarioSeleccionado != null) {
+        // 1. PANTALLA DE DETALLE DEL USUARIO
+        UserDetailScreen(
+            usuario = usuarioSeleccionado!!,
+            onBackClick = {
+                usuarioSeleccionado = null // Volver a la lista
+            },
+            onToggleDeshabilitar = { deshabilitar ->
+                val nuevoEstado = if (deshabilitar) {
+                    EstadoVerificacion.DESHABILITADO
+                } else {
+                    EstadoVerificacion.VERIFICADO
+                }
+
+                // Actualizar en Firebase/BD
+                viewModel.cambiarEstadoUsuario(usuarioSeleccionado!!.id, nuevoEstado)
+
+                // Actualizar estado local para reflejar el cambio inmediato en pantalla
+                usuarioSeleccionado = usuarioSeleccionado!!.copy(estado = nuevoEstado)
+            },
+            onEliminarPermanente = {
+                viewModel.eliminarUsuario(usuarioSeleccionado!!.id)
+                usuarioSeleccionado = null // Volver a la lista tras eliminar
+            }
+        )
+    } else {
+        // 2. PANTALLA DE LISTA DE USUARIOS
+        AdminUsersScreen(
+            viewModel = viewModel,
+            onNavigateToHome = onNavigateToHome,
+            onVerDetalleUsuario = { usuario ->
+                usuarioSeleccionado = usuario // Abrir detalle
+            }
+        )
+    }
+}
+
+// ==========================================
+// PANTALLA DE LISTA DE USUARIOS
 // ==========================================
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -70,8 +120,6 @@ fun AdminUsersScreen(
     onNavigateToHome: () -> Unit = {},
     onVerDetalleUsuario: (UsuarioAdmin) -> Unit = {}
 ) {
-    val context = LocalContext.current
-
     // Cargar datos al entrar a la pantalla
     LaunchedEffect(Unit) {
         viewModel.cargarUsuarios()
@@ -114,7 +162,8 @@ fun AdminUsersScreen(
 
         val coincideEstado = if (estadoVerificacionFiltro == EstadoVerificacion.TODOS) true else user.estado == estadoVerificacionFiltro
 
-        val coincideCalificacion = user.calificacion >= rangoCalificacion.start && user.calificacion <= rangoCalificacion.endInclusive
+        val coincideCalificacion = user.calificacion == null ||
+                (user.calificacion >= rangoCalificacion.start && user.calificacion <= rangoCalificacion.endInclusive)
 
         val coincideFecha = try {
             var valid = true
@@ -218,7 +267,7 @@ fun AdminUsersScreen(
                     CircularProgressIndicator(color = Color(0xFF1976D2))
                 }
             } else {
-                // Lista Scrolleable con los Filtros y los Usuarios Reales
+                // Lista con Filtros y Usuarios Reales
                 LazyColumn(
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -591,7 +640,7 @@ private fun UsuarioItemCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             AsyncImage(
-                model = if (!usuario.fotoUrl.isNullBlanks()) usuario.fotoUrl else "https://via.placeholder.com/150",
+                model = if (!usuario.fotoUrl.isNullOrEmpty()) usuario.fotoUrl else "https://via.placeholder.com/150",
                 contentDescription = usuario.nombre,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -624,6 +673,7 @@ private fun UsuarioItemCard(
                         Color(0xFFF3E8FF) to Color(0xFF6B21A8)
                     }
 
+                    // Rol (CLIENTE / PRESTADOR)
                     Surface(
                         color = rolBg,
                         shape = RoundedCornerShape(6.dp)
@@ -637,12 +687,13 @@ private fun UsuarioItemCard(
                         )
                     }
 
+                    // Estado de Verificación
                     Surface(
                         color = usuario.estado.badgeColor,
                         shape = RoundedCornerShape(6.dp)
                     ) {
                         Text(
-                            text = usuario.estado.name,
+                            text = usuario.estado.label,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = usuario.estado.textColor,
@@ -652,6 +703,7 @@ private fun UsuarioItemCard(
                 }
             }
 
+            // Calificación (-.- si no tiene)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Default.Star,
@@ -661,7 +713,7 @@ private fun UsuarioItemCard(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "%.1f".format(usuario.calificacion),
+                    text = usuario.calificacion?.let { "%.1f".format(it) } ?: "-.-",
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
                     color = Color(0xFF374151)
@@ -719,5 +771,3 @@ private fun UsuarioItemCard(
         }
     }
 }
-
-private fun String?.isNullBlanks(): Boolean = this == null || this.isBlank()
