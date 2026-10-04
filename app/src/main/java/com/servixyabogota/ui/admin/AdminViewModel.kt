@@ -90,7 +90,7 @@ class AdminViewModel : ViewModel() {
                         val uid = map["uid"] as? String ?: return@mapNotNull null
                         val rolStr = (map["rol"] as? String ?: "cliente").lowercase()
 
-                        // 1. EXCLUIR ADMINISTRADORES
+                        // Excluir administradores
                         if (rolStr == "admin") return@mapNotNull null
 
                         val nombre = map["nombre"] as? String ?: ""
@@ -100,6 +100,13 @@ class AdminViewModel : ViewModel() {
 
                         val email = map["email"] as? String ?: map["correo"] as? String ?: ""
                         val cedula = map["cedula"] as? String ?: map["numeroCedula"] as? String ?: ""
+
+                        // TELÉFONO REAL
+                        val telefono = map["telefono"] as? String
+                            ?: map["celular"] as? String
+                            ?: map["telefonoContacto"] as? String
+                            ?: ""
+
                         val fotoUrl = map["fotoUrl"] as? String ?: map["foto"] as? String
 
                         val rolEnum = when (rolStr) {
@@ -107,24 +114,28 @@ class AdminViewModel : ViewModel() {
                             else -> RolUsuario.CLIENTE
                         }
 
-                        // 3. ESTADO NO VERIFICADO POR DEFECTO PARA USUARIOS NUEVOS
                         val estadoStr = (map["estadoVerificacion"] as? String ?: "NO_VERIFICADO").uppercase()
                         val estadoEnum = when (estadoStr) {
                             "APROBADO", "VERIFICADO" -> EstadoVerificacion.VERIFICADO
                             "DESHABILITADO" -> EstadoVerificacion.DESHABILITADO
                             "PENDIENTE_VERIFICACION", "PENDIENTE" -> EstadoVerificacion.PENDIENTE
-                            else -> EstadoVerificacion.NO_VERIFICADO // "NO_VERIFICADO", "NO_ENVIADO", o vacíos
+                            else -> EstadoVerificacion.NO_VERIFICADO
                         }
 
-                        // 2. CALIFICACIÓN NULL SI NO TIENE
                         val calificacionRaw = (map["calificacion"] as? Number)?.toDouble()
                             ?: (map["calificacionPromedio"] as? Number)?.toDouble()
 
                         val calificacionFinal = if (calificacionRaw != null && calificacionRaw > 0.0) {
                             calificacionRaw
                         } else {
-                            null // Permite mostrar "-.-" en la interfaz
+                            null
                         }
+
+                        // SERVICIOS COMPLETADOS / SOLICITUDES COMPLETADAS REALES
+                        val serviciosTotales = (map["serviciosTotales"] as? Number)?.toInt()
+                            ?: (map["solicitudesCompletadas"] as? Number)?.toInt()
+                            ?: (map["serviciosCompletados"] as? Number)?.toInt()
+                            ?: 0
 
                         val fechaMs = (map["fechaActualizacion"] as? Number)?.toLong()
                             ?: (map["fechaCreacion"] as? Number)?.toLong()
@@ -135,10 +146,12 @@ class AdminViewModel : ViewModel() {
                             nombre = nombreCompleto,
                             correo = email,
                             cedula = cedula,
+                            telefono = telefono,
                             fotoUrl = fotoUrl,
                             rol = rolEnum,
                             estado = estadoEnum,
                             calificacion = calificacionFinal,
+                            serviciosTotales = serviciosTotales,
                             fechaRegistroMs = fechaMs
                         )
                     }

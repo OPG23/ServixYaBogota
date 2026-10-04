@@ -2,7 +2,6 @@ package com.servixyabogota.ui.admin
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -34,9 +33,6 @@ import java.util.Locale
 @Composable
 fun UserDetailScreen(
     usuario: UsuarioAdmin,
-    telefono: String = "+57 310 456 7890", // O pásalo desde tu modelo/mapa
-    serviciosTotales: Int = 24,
-    reportesRecibidos: Int = 0,
     onBackClick: () -> Unit,
     onToggleDeshabilitar: (Boolean) -> Unit,
     onEliminarPermanente: () -> Unit
@@ -46,13 +42,12 @@ fun UserDetailScreen(
         mutableStateOf(usuario.estado == EstadoVerificacion.DESHABILITADO)
     }
 
-    // Formateo de fecha de registro
     val fechaFormateada = remember(usuario.fechaRegistroMs) {
         if (usuario.fechaRegistroMs > 0) {
             val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
             sdf.format(Date(usuario.fechaRegistroMs))
         } else {
-            "10/08/2026"
+            "Sin fecha"
         }
     }
 
@@ -77,7 +72,6 @@ fun UserDetailScreen(
                     }
                 },
                 actions = {
-                    // Badge del Rol (Top Right)
                     val (rolBg, rolColor) = if (usuario.rol == RolUsuario.CLIENTE) {
                         Color(0xFFEFF6FF) to Color(0xFF1D4ED8)
                     } else {
@@ -112,7 +106,7 @@ fun UserDetailScreen(
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
 
-            // 1. TARJETA PRINCIPAL DEL PERFIL
+            // TARJETA PRINCIPAL DEL PERFIL
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -126,7 +120,6 @@ fun UserDetailScreen(
                         .padding(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Foto
                     AsyncImage(
                         model = usuario.fotoUrl.takeIf { !it.isNullOrBlank() }
                             ?: "https://via.placeholder.com/150",
@@ -140,7 +133,6 @@ fun UserDetailScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Nombre
                     Text(
                         text = usuario.nombre,
                         fontWeight = FontWeight.Bold,
@@ -150,7 +142,6 @@ fun UserDetailScreen(
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Badge Estado de Cuenta
                     val (estadoBg, estadoColor, estadoText) = if (estaDeshabilitado) {
                         Triple(Color(0xFFFEE2E2), Color(0xFFB91C1C), "Cuenta Suspendida")
                     } else {
@@ -208,7 +199,7 @@ fun UserDetailScreen(
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = telefono,
+                            text = usuario.telefono.ifBlank { "Sin teléfono registrado" },
                             fontSize = 14.sp,
                             color = Color(0xFF374151)
                         )
@@ -216,50 +207,32 @@ fun UserDetailScreen(
                 }
             }
 
-            // 2. MÉTRICAS DE DESEMPEÑO
+            // MÉTRICAS DE DESEMPEÑO (SOLO CALIFICACIÓN Y FECHA DE REGISTRO)
             Text(
-                text = "Métricas de Desempeño",
+                text = "Métrica de Desempeño",
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp,
                 color = Color(0xFF1F2937)
             )
 
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    MetricaCard(
-                        titulo = "Servicios Totales",
-                        valor = serviciosTotales.toString(),
-                        modifier = Modifier.weight(1f)
-                    )
-                    MetricaCard(
-                        titulo = "Calificación",
-                        valor = usuario.calificacion?.let { "%.1f".format(it) } ?: "-.-",
-                        conEstrella = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    MetricaCard(
-                        titulo = "Fecha Registro",
-                        valor = fechaFormateada,
-                        modifier = Modifier.weight(1f)
-                    )
-                    MetricaCard(
-                        titulo = "Reportes Recibidos",
-                        valor = reportesRecibidos.toString(),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                MetricaCard(
+                    titulo = "Calificación",
+                    valor = usuario.calificacion?.let { "%.1f".format(it) } ?: "-.-",
+                    conEstrella = true,
+                    modifier = Modifier.weight(1f)
+                )
+                MetricaCard(
+                    titulo = "Fecha Registro",
+                    valor = fechaFormateada,
+                    modifier = Modifier.weight(1f)
+                )
             }
 
-            // 3. CONTROL ADMINISTRATIVO
+            // CONTROL ADMINISTRATIVO
             Text(
                 text = "Control Administrativo",
                 fontWeight = FontWeight.Bold,
@@ -270,7 +243,7 @@ fun UserDetailScreen(
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = BorderStroke(1.5.dp, Color(0xFFF59E0B)), // Borde ámbar/naranja
+                border = BorderStroke(1.5.dp, Color(0xFFF59E0B)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -278,7 +251,6 @@ fun UserDetailScreen(
                         .fillMaxWidth()
                         .padding(16.dp)
                 ) {
-                    // Switch Deshabilitar
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -316,7 +288,6 @@ fun UserDetailScreen(
                     HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Botón Eliminar Permanentemente
                     OutlinedButton(
                         onClick = { mostrarDialogoEliminar = true },
                         modifier = Modifier.fillMaxWidth(),
@@ -360,7 +331,6 @@ fun UserDetailScreen(
         }
     }
 
-    // Diálogo de Confirmación para Eliminar
     if (mostrarDialogoEliminar) {
         AlertDialog(
             onDismissRequest = { mostrarDialogoEliminar = false },

@@ -53,10 +53,12 @@ data class UsuarioAdmin(
     val nombre: String,
     val correo: String,
     val cedula: String,
+    val telefono: String = "",
     val fotoUrl: String?,
     val rol: RolUsuario,
     val estado: EstadoVerificacion,
-    val calificacion: Double?, // Permite ser nulo si no tiene calificaciones
+    val calificacion: Double?,
+    val serviciosTotales: Int = 0,
     val fechaRegistroMs: Long = 0L
 )
 
@@ -308,18 +310,7 @@ fun AdminUsersScreen(
                     items(usuariosFiltrados, key = { it.id }) { usuario ->
                         UsuarioItemCard(
                             usuario = usuario,
-                            onClick = { onVerDetalleUsuario(usuario) },
-                            onToggleEstado = {
-                                val nuevoEstado = if (usuario.estado == EstadoVerificacion.DESHABILITADO) {
-                                    EstadoVerificacion.VERIFICADO
-                                } else {
-                                    EstadoVerificacion.DESHABILITADO
-                                }
-                                viewModel.cambiarEstadoUsuario(usuario.id, nuevoEstado)
-                            },
-                            onEliminar = {
-                                viewModel.eliminarUsuario(usuario.id)
-                            }
+                            onClick = { onVerDetalleUsuario(usuario) }
                         )
                     }
                 }
@@ -619,12 +610,8 @@ private fun FechaSelectorField(
 @Composable
 private fun UsuarioItemCard(
     usuario: UsuarioAdmin,
-    onClick: () -> Unit,
-    onToggleEstado: () -> Unit,
-    onEliminar: () -> Unit
+    onClick: () -> Unit
 ) {
-    var menuExpanded by remember { mutableStateOf(false) }
-
     Card(
         onClick = onClick,
         shape = RoundedCornerShape(16.dp),
@@ -718,55 +705,6 @@ private fun UsuarioItemCard(
                     fontSize = 14.sp,
                     color = Color(0xFF374151)
                 )
-            }
-
-            Box {
-                IconButton(onClick = { menuExpanded = true }) {
-                    Icon(
-                        imageVector = Icons.Default.MoreVert,
-                        contentDescription = "Opciones",
-                        tint = Color(0xFF6B7280)
-                    )
-                }
-
-                DropdownMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { menuExpanded = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Ver Detalle") },
-                        leadingIcon = { Icon(Icons.Default.Visibility, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onClick()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                if (usuario.estado == EstadoVerificacion.DESHABILITADO) "Habilitar Cuenta" else "Deshabilitar Cuenta"
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                if (usuario.estado == EstadoVerificacion.DESHABILITADO) Icons.Default.CheckCircle else Icons.Default.Block,
-                                contentDescription = null
-                            )
-                        },
-                        onClick = {
-                            menuExpanded = false
-                            onToggleEstado()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Eliminar Usuario", color = Color.Red) },
-                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red) },
-                        onClick = {
-                            menuExpanded = false
-                            onEliminar()
-                        }
-                    )
-                }
             }
         }
     }
