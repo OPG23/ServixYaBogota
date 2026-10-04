@@ -63,7 +63,6 @@ class AuthViewModel : ViewModel() {
         _loading.value = true
         viewModelScope.launch {
             try {
-                // Estado inicial correcto según la data class
                 val estadoVerif = if (rol == "prestador") "NO_ENVIADO" else "N/A"
 
                 val user = User(
@@ -72,7 +71,7 @@ class AuthViewModel : ViewModel() {
                     apellido = apellido.trim(),
                     cedula = cedula.trim(),
                     telefono = tel.trim(),
-                    rol = rol, // "cliente", "prestador", "administrador"
+                    rol = rol,
                     estadoVerificacion = estadoVerif
                 )
                 val result = repository.registerUser(user, pass.trim())
