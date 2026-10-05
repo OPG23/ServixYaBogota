@@ -9,6 +9,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -40,10 +41,16 @@ fun LoginScreen(
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
 
+    // Estado para controlar la visibilidad del modal de recuperación
+    var showResetDialog by remember { mutableStateOf(false) }
+    var resetEmail by remember { mutableStateOf("") }
+
     val isLoading by viewModel.loading.observeAsState(initial = false)
     val authResult by viewModel.authResult.observeAsState()
+    val resetPasswordResult by viewModel.resetPasswordResult.observeAsState()
     val context = LocalContext.current
 
+    // Listener para el resultado del Login
     LaunchedEffect(authResult) {
         authResult?.let { result ->
             result.onSuccess { rol ->
@@ -53,6 +60,20 @@ fun LoginScreen(
                 Toast.makeText(context, error.message ?: "Error de credenciales", Toast.LENGTH_LONG).show()
             }
             viewModel.clearAuthResult()
+        }
+    }
+
+    // Listener para el resultado de la Recuperación de Contraseña
+    LaunchedEffect(resetPasswordResult) {
+        resetPasswordResult?.let { result ->
+            result.onSuccess { mensaje ->
+                Toast.makeText(context, mensaje, Toast.LENGTH_LONG).show()
+                showResetDialog = false
+                resetEmail = ""
+            }.onFailure { error ->
+                Toast.makeText(context, error.message ?: "Error al enviar correo", Toast.LENGTH_LONG).show()
+            }
+            viewModel.clearResetPasswordResult()
         }
     }
 
@@ -158,8 +179,12 @@ fun LoginScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
+        // BOTÓN ¿OLVIDÉ MI CONTRASEÑA?
         TextButton(
-            onClick = { /* Lógica de recuperar clave */ },
+            onClick = {
+                resetEmail = email // Pre-llena el correo si ya lo había escrito
+                showResetDialog = true
+            },
             modifier = Modifier.align(Alignment.End)
         ) {
             Text("¿Olvidé mi contraseña?", color = Color(0xFF1976D2), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
@@ -216,5 +241,75 @@ fun LoginScreen(
                 fontSize = 14.sp
             )
         }
+    }
+
+    // MODAL DE RECUPERACIÓN DE CONTRASEÑA
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!isLoading) showResetDialog = false },
+            shape = RoundedCornerShape(16.dp),
+            containerColor = Color.White,
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Email,
+                    contentDescription = null,
+                    tint = Color(0xFF1976D2),
+                    modifier = Modifier.size(36.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Recuperar Contraseña",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = Color(0xFF1D1B20)
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Ingresa tu correo registrado para enviarte un enlace de restablecimiento.",
+                        fontSize = 13.sp,
+                        color = Color.Gray
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = resetEmail,
+                        onValueChange = { resetEmail = it },
+                        placeholder = { Text("correo@ejemplo.com", color = Color.LightGray) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.enviarCorreoRecuperacion(resetEmail) },
+                    enabled = !isLoading,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text("Enviar Correo", fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showResetDialog = false },
+                    enabled = !isLoading
+                ) {
+                    Text("Cancelar", color = Color.Gray)
+                }
+            }
+        )
     }
 }

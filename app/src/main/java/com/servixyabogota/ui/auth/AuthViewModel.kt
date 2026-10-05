@@ -121,4 +121,36 @@ class AuthViewModel : ViewModel() {
         usuarioActual = null
         clearAuthResult()
     }
+
+
+    // Estado para la recuperación de contraseña
+    private val _resetPasswordResult = MutableLiveData<Result<String>?>()
+    val resetPasswordResult: LiveData<Result<String>?> = _resetPasswordResult
+
+    fun clearResetPasswordResult() {
+        _resetPasswordResult.value = null
+    }
+
+    fun enviarCorreoRecuperacion(email: String) {
+        if (email.isBlank()) {
+            _resetPasswordResult.value = Result.failure(Exception("Por favor ingresa tu correo electrónico."))
+            return
+        }
+
+        _loading.value = true
+        viewModelScope.launch {
+            try {
+                val result = repository.sendPasswordResetEmail(email.trim())
+                result.onSuccess {
+                    _resetPasswordResult.value = Result.success("Hemos enviado un enlace de recuperación a tu correo.")
+                }.onFailure { e ->
+                    _resetPasswordResult.value = Result.failure(e)
+                }
+            } catch (e: Exception) {
+                _resetPasswordResult.value = Result.failure(e)
+            } finally {
+                _loading.value = false
+            }
+        }
+    }
 }
