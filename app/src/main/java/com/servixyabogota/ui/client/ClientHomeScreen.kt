@@ -26,6 +26,17 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import java.util.Locale
 
+// Función auxiliar para generar las iniciales (Ej: "Juan Manco" -> "JM")
+private fun obtenerIniciales(nombre: String): String {
+    if (nombre.isBlank()) return "U"
+    val partes = nombre.trim().split("\\s+".toRegex())
+    return when {
+        partes.size >= 2 -> "${partes[0].take(1)}${partes[1].take(1)}".uppercase()
+        partes.isNotEmpty() && partes[0].isNotEmpty() -> partes[0].take(2).uppercase()
+        else -> "U"
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ClientHomeScreen(
@@ -36,14 +47,11 @@ fun ClientHomeScreen(
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var categoriaSeleccionada by remember { mutableStateOf("") }
-    // Estado para controlar el ordenamiento por calificación
     var ordenarPorCalificacion by remember { mutableStateOf(false) }
 
-    // Obtenemos los prestadores reales desde el ViewModel
     val listaPrestadores = viewModel.listaPrestadores
     val estaCargando = viewModel.estaCargandoPrestadores
 
-    // CATEGORÍAS CON EMOJIS
     val categoriasList = remember {
         listOf(
             CategoriaItem("Plomería", "🪠"),
@@ -56,7 +64,6 @@ fun ClientHomeScreen(
         )
     }
 
-    // FILTRADO Y ORDENAMIENTO DINÁMICO
     val prestadoresFiltrados = remember(
         listaPrestadores,
         categoriaSeleccionada,
@@ -124,15 +131,36 @@ fun ClientHomeScreen(
                         )
                     }
 
-                    AsyncImage(
-                        model = viewModel.fotoUrl.ifBlank { "https://i.pravatar.cc/150?img=32" },
-                        contentDescription = "Perfil Cliente",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .border(1.dp, Color(0xFFE2E8F0), CircleShape)
-                    )
+                    // 🟢 FOTO DE PERFIL O INICIALES DEL CLIENTE
+                    if (viewModel.fotoUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = viewModel.fotoUrl,
+                            contentDescription = "Perfil Cliente",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .border(1.dp, Color(0xFFE2E8F0), CircleShape)
+                        )
+                    } else {
+                        // Obtiene el nombre desde el ViewModel (ejemplo: viewModel.nombre)
+                        val iniciales = obtenerIniciales(viewModel.nombre)
+
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF2563EB)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = iniciales,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
+                        }
+                    }
                 }
             }
 
@@ -238,7 +266,6 @@ fun ClientHomeScreen(
 
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    // Chip de filtro por mejor calificación
                     FilterChip(
                         selected = ordenarPorCalificacion,
                         onClick = { ordenarPorCalificacion = !ordenarPorCalificacion },
@@ -326,7 +353,6 @@ private fun ProviderCard(
     onClickCard: () -> Unit,
     onIniciarChat: () -> Unit
 ) {
-    // Formato de Calificación: -.- si no tiene reseñas, o 1 decimal si ya tiene
     val calificacionTexto = if (prestador.totalResenas <= 0 || prestador.calificacion <= 0.0) {
         "-.-"
     } else {
@@ -349,15 +375,34 @@ private fun ProviderCard(
             ) {
                 // Foto de perfil + Badge Verificado
                 Box(modifier = Modifier.size(64.dp)) {
-                    AsyncImage(
-                        model = prestador.fotoUrl.ifBlank { "https://i.pravatar.cc/150?img=11" },
-                        contentDescription = prestador.nombre,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape)
-                            .background(Color(0xFFE2E8F0))
-                    )
+                    if (prestador.fotoUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = prestador.fotoUrl,
+                            contentDescription = prestador.nombre,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape)
+                                .background(Color(0xFFE2E8F0))
+                        )
+                    } else {
+                        val iniciales = obtenerIniciales(prestador.nombre)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape)
+                                .background(Color(0xFF2563EB)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = iniciales,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 20.sp
+                            )
+                        }
+                    }
+
                     if (prestador.verificado) {
                         Box(
                             modifier = Modifier
