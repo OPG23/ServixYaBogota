@@ -53,14 +53,16 @@ class AuthRepository {
         }
     }
 
-    suspend fun loginUser(email: String, password: String): Result<String> {
+    suspend fun loginUser(email: String, password: String): Result<User> {
         return try {
             val creds = auth.signInWithEmailAndPassword(email, password).await()
             val uid = creds.user?.uid ?: throw Exception("Error de autenticación")
 
             val doc = db.collection(USERS_COLLECTION).document(uid).get().await()
-            val rol = doc.getString("rol") ?: "cliente"
-            Result.success(rol)
+            val user = doc.toObject(User::class.java) ?: throw Exception("Usuario no encontrado")
+            val userConUid = user.copy(uid = uid)
+
+            Result.success(userConUid)
         } catch (e: Exception) {
             Result.failure(e)
         }

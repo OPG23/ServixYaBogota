@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import com.servixyabogota.ui.admin.AdminUsersContainer
 import com.servixyabogota.ui.admin.AdminVerificationScreen
 import com.servixyabogota.ui.admin.AdminViewModel
+import com.servixyabogota.ui.auth.AccountDisabledScreen
 import com.servixyabogota.ui.auth.AuthViewModel
 import com.servixyabogota.ui.auth.LoginScreen
 import com.servixyabogota.ui.auth.RegisterScreen
@@ -48,10 +49,18 @@ class MainActivity : ComponentActivity() {
                         },
                         onLoginSuccess = { rol ->
                             authViewModel.clearAuthResult()
-                            currentScreen = when (rol.lowercase()) {
-                                "administrador", "admin" -> "home_admin"
-                                "prestador" -> "home_prestador"
-                                else -> "home_cliente"
+
+                            val estado = authViewModel.usuarioActual?.estadoVerificacion?.uppercase() ?: ""
+                            val estaDeshabilitado = estado == "DESHABILITADO" || estado == "INHABILITADO" || estado == "DESACTIVADO"
+
+                            if (estaDeshabilitado) {
+                                currentScreen = "cuenta_deshabilitada"
+                            } else {
+                                currentScreen = when (rol.lowercase()) {
+                                    "administrador", "admin" -> "home_admin"
+                                    "prestador" -> "home_prestador"
+                                    else -> "home_cliente"
+                                }
                             }
                         }
                     )
@@ -67,6 +76,18 @@ class MainActivity : ComponentActivity() {
                             currentScreen = "login"
                         }
                     )
+
+                    // PANTALLA DE CUENTA INHABILITADA
+                    "cuenta_deshabilitada" -> {
+                        AccountDisabledScreen(
+                            nombreUsuario = authViewModel.usuarioActual?.nombre ?: "Usuario",
+                            onCerrarSesion = {
+                                authViewModel.cerrarSesion() // Método de tu AuthViewModel para desloguear
+                                authViewModel.clearAuthResult()
+                                currentScreen = "login"
+                            }
+                        )
+                    }
 
                     "home_admin" -> {
                         LaunchedEffect(Unit) {

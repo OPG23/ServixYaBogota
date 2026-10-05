@@ -91,7 +91,7 @@ class AdminViewModel : ViewModel() {
                         val rolStr = (map["rol"] as? String ?: "cliente").lowercase()
 
                         // Excluir administradores
-                        if (rolStr == "admin") return@mapNotNull null
+                        if (rolStr == "administrador") return@mapNotNull null
 
                         val nombre = map["nombre"] as? String ?: ""
                         val apellido = map["apellido"] as? String ?: ""
