@@ -106,7 +106,6 @@ class ProviderViewModel : ViewModel() {
     var estaCargandoMisTrabajos by mutableStateOf(false)
         private set
 
-    // Referencias para escuchadores y caché en tiempo real
     private val solicitudesCache = mutableMapOf<String, DocumentSnapshot>()
     private var misTrabajosGroupListener: ListenerRegistration? = null
     private var resenasUserListener: ListenerRegistration? = null
@@ -131,6 +130,195 @@ class ProviderViewModel : ViewModel() {
         solicitudesCache.clear()
     }
 
+    fun cargarPerfil() {
+        val uid = auth.currentUser?.uid ?: return
+
+        _uiState.value = EstadoProveedorUiState()
+        promedioCalificacion = 0.0
+        totalResenasCount = 0
+        listaResenasRecibidas = emptyList()
+        listaResenasOtorgadas = emptyList()
+        listaMisTrabajosActivos = emptyList()
+        listaHistorialTrabajos = emptyList()
+        listaChatsDirectos = emptyList()
+
+        escucharChatsDirectos()
+        escucharResenas()
+        escucharMisTrabajos()
+
+        viewModelScope.launch {
+            try {
+                val snapshot = db.collection("usuarios").document(uid).get().await()
+                if (snapshot.exists()) {
+                    val user = snapshot.toObject(User::class.java)
+                    user?.let {
+                        val profesionGuardada = it.profesion.replace(Regex("[^a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]"), "").trim()
+                        val rawCategorias = (snapshot.get("categorias") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+
+                        // 🟢 Conservar categoría inicial si el array de categorías está vacío
+                        val categoriasFinales = if (rawCategorias.isEmpty() && profesionGuardada.isNotBlank()) {
+                            listOf(profesionGuardada)
+                        } else {
+                            rawCategorias
+                        }
+
+                        _uiState.value = EstadoProveedorUiState(
+                            nombreCompleto = it.nombreCompleto,
+                            profesion = profesionGuardada,
+                            fotoUrl = snapshot.getString("fotoUrl") ?: "",
+                            telefono = snapshot.getString("telefono") ?: snapshot.getString("celular") ?: "",
+                            correo = snapshot.getString("correo") ?: auth.currentUser?.email ?: "",
+                            estadoVerificacion = it.estadoVerificacion,
+                            motivoRechazo = it.motivoRechazo,
+                            justificacionRechazo = it.justificacionRechazo,
+                            documentosRechazados = it.documentosRechazados,
+                            localidades = (snapshot.get("localidades") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                            categorias = categoriasFinales,
+                            portafolioUrls = (snapshot.get("portafolioUrls") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                            descripcion = snapshot.getString("descripcion") ?: ""
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun subirDocumentosPrestador(
+        profesion: String,
+        fotoPerfil: Uri?,
+        cedulaFrente: Uri?,
+        cedulaAtras: Uri?,
+        antecedentes: Uri?,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val uid = auth.currentUser?.uid ?: run {
+            onError("Usuario no autenticado.")
+            return
+        }
+
+        _isUploading.value = true
+
+        viewModelScope.launch {
+            try {
+                val profesionLimpia = profesion.replace(Regex("[^a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]"), "").trim()
+
+                val updates = mutableMapOf<String, Any>(
+                    "profesion" to profesionLimpia,
+                    "categorias" to listOf(profesionLimpia), // 🟢 Guarda la categoría limpia en el registro
+                    "estadoVerificacion" to "PENDIENTE_VERIFICACION",
+                    "documentosRechazados" to emptyList<String>(),
+                    "fechaEnvioDocumentos" to System.currentTimeMillis()
+                )
+
+                fotoPerfil?.let { uri ->
+                    val ref = storage.reference.child("usuarios/$uid/foto_perfil.jpg")
+                    ref.putFile(uri).await()
+                    updates["fotoUrl"] = ref.downloadUrl.await().toString()
+                }
+
+                cedulaFrente?.let { uri ->
+                    val ref = storage.reference.child("usuarios/$uid/cedula_frente.jpg")
+                    ref.putFile(uri).await()
+                    updates["documentos.cedulaFrente"] = ref.downloadUrl.await().toString()
+                }
+
+                cedulaAtras?.let { uri ->
+                    val ref = storage.reference.child("usuarios/$uid/cedula_atras.jpg")
+                    ref.putFile(uri).await()
+                    updates["documentos.cedulaAtras"] = ref.downloadUrl.await().toString()
+                }
+
+                antecedentes?.let { uri ->
+                    val ref = storage.reference.child("usuarios/$uid/antecedentes.pdf")
+                    ref.putFile(uri).await()
+                    updates["documentos.antecedentes"] = ref.downloadUrl.await().toString()
+                }
+
+                db.collection("usuarios").document(uid).update(updates).await()
+                cargarPerfil()
+                _isUploading.value = false
+                onSuccess()
+
+            } catch (e: Exception) {
+                _isUploading.value = false
+                onError(e.localizedMessage ?: "Error al subir los documentos.")
+            }
+        }
+    }
+
+    fun guardarCoberturaYPortafolio(
+        localidades: List<String>,
+        categorias: List<String>,
+        itemsPortafolio: List<ItemPortafolio>,
+        descripcion: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val uid = auth.currentUser?.uid ?: run {
+            onError("Usuario no autenticado.")
+            return
+        }
+
+        _isUploading.value = true
+
+        viewModelScope.launch {
+            try {
+                val urlsAnteriores = _uiState.value?.portafolioUrls ?: emptyList()
+
+                val urlsConservadas = itemsPortafolio
+                    .mapNotNull { it.uri?.toString() }
+                    .filter { it.startsWith("http://") || it.startsWith("https://") }
+
+                val urlsABorrar = urlsAnteriores.filter { url -> !urlsConservadas.contains(url) }
+
+                urlsABorrar.forEach { url ->
+                    try {
+                        storage.getReferenceFromUrl(url).delete().await()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+
+                val urlsFinales = mutableListOf<String>()
+
+                itemsPortafolio.forEachIndexed { index, item ->
+                    val uri = item.uri
+                    if (uri != null) {
+                        val uriString = uri.toString()
+                        if (uriString.startsWith("http://") || uriString.startsWith("https://")) {
+                            urlsFinales.add(uriString)
+                        } else {
+                            val ext = if (item.esVideo) "mp4" else "jpg"
+                            val ref = storage.reference.child("usuarios/$uid/portafolio/item_${System.currentTimeMillis()}_$index.$ext")
+                            ref.putFile(uri).await()
+                            val urlDescarga = ref.downloadUrl.await().toString()
+                            urlsFinales.add(urlDescarga)
+                        }
+                    }
+                }
+
+                val updates = mapOf(
+                    "localidades" to localidades,
+                    "categorias" to categorias,
+                    "portafolioUrls" to urlsFinales,
+                    "descripcion" to descripcion
+                )
+
+                db.collection("usuarios").document(uid).set(updates, SetOptions.merge()).await()
+                cargarPerfil()
+                _isUploading.value = false
+                onSuccess()
+
+            } catch (e: Exception) {
+                _isUploading.value = false
+                onError(e.localizedMessage ?: "Error al guardar el portafolio.")
+            }
+        }
+    }
+
     fun escucharResenas() {
         val uid = auth.currentUser?.uid ?: return
         estaCargandoResenas = true
@@ -145,9 +333,7 @@ class ProviderViewModel : ViewModel() {
                     promedioCalificacion = snapshot.getDouble("calificacion")
                         ?: snapshot.getDouble("promedioCalificacion")
                                 ?: 0.0
-                    totalResenasCount = snapshot.getLong("totalResenas")?.toInt()
-                        ?: snapshot.getLong("totalEvaluaciones")?.toInt()
-                                ?: 0
+                    totalResenasCount = snapshot.getLong("totalResenas")?.toInt() ?: 0
                 }
             }
 
@@ -466,53 +652,6 @@ class ProviderViewModel : ViewModel() {
             }
     }
 
-    fun cargarPerfil() {
-        val uid = auth.currentUser?.uid ?: return
-
-        // Limpiar estado previo para evitar mostrar datos del usuario anterior
-        _uiState.value = EstadoProveedorUiState()
-        promedioCalificacion = 0.0
-        totalResenasCount = 0
-        listaResenasRecibidas = emptyList()
-        listaResenasOtorgadas = emptyList()
-        listaMisTrabajosActivos = emptyList()
-        listaHistorialTrabajos = emptyList()
-        listaChatsDirectos = emptyList()
-
-        // Reiniciar escuchadores
-        escucharChatsDirectos()
-        escucharResenas()
-        escucharMisTrabajos()
-
-        viewModelScope.launch {
-            try {
-                val snapshot = db.collection("usuarios").document(uid).get().await()
-                if (snapshot.exists()) {
-                    val user = snapshot.toObject(User::class.java)
-                    user?.let {
-                        _uiState.value = EstadoProveedorUiState(
-                            nombreCompleto = it.nombreCompleto,
-                            profesion = it.profesion,
-                            fotoUrl = snapshot.getString("fotoUrl") ?: "",
-                            telefono = snapshot.getString("telefono") ?: snapshot.getString("celular") ?: "",
-                            correo = snapshot.getString("correo") ?: auth.currentUser?.email ?: "",
-                            estadoVerificacion = it.estadoVerificacion,
-                            motivoRechazo = it.motivoRechazo,
-                            justificacionRechazo = it.justificacionRechazo,
-                            documentosRechazados = it.documentosRechazados,
-                            localidades = (snapshot.get("localidades") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
-                            categorias = (snapshot.get("categorias") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
-                            portafolioUrls = (snapshot.get("portafolioUrls") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
-                            descripcion = snapshot.getString("descripcion") ?: ""
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-    }
-
     fun actualizarContactoPerfil(
         telefono: String,
         correo: String,
@@ -535,137 +674,6 @@ class ProviderViewModel : ViewModel() {
                 onSuccess()
             } catch (e: Exception) {
                 onError(e.localizedMessage ?: "Error al actualizar contacto.")
-            }
-        }
-    }
-
-    fun subirDocumentosPrestador(
-        profesion: String,
-        fotoPerfil: Uri?,
-        cedulaFrente: Uri?,
-        cedulaAtras: Uri?,
-        antecedentes: Uri?,
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit
-    ) {
-        val uid = auth.currentUser?.uid ?: run {
-            onError("Usuario no autenticado.")
-            return
-        }
-
-        _isUploading.value = true
-
-        viewModelScope.launch {
-            try {
-                val updates = mutableMapOf<String, Any>(
-                    "profesion" to profesion,
-                    "estadoVerificacion" to "PENDIENTE_VERIFICACION",
-                    "documentosRechazados" to emptyList<String>(),
-                    "fechaEnvioDocumentos" to System.currentTimeMillis()
-                )
-
-                fotoPerfil?.let { uri ->
-                    val ref = storage.reference.child("usuarios/$uid/foto_perfil.jpg")
-                    ref.putFile(uri).await()
-                    updates["fotoUrl"] = ref.downloadUrl.await().toString()
-                }
-
-                cedulaFrente?.let { uri ->
-                    val ref = storage.reference.child("usuarios/$uid/cedula_frente.jpg")
-                    ref.putFile(uri).await()
-                    updates["documentos.cedulaFrente"] = ref.downloadUrl.await().toString()
-                }
-
-                cedulaAtras?.let { uri ->
-                    val ref = storage.reference.child("usuarios/$uid/cedula_atras.jpg")
-                    ref.putFile(uri).await()
-                    updates["documentos.cedulaAtras"] = ref.downloadUrl.await().toString()
-                }
-
-                antecedentes?.let { uri ->
-                    val ref = storage.reference.child("usuarios/$uid/antecedentes.pdf")
-                    ref.putFile(uri).await()
-                    updates["documentos.antecedentes"] = ref.downloadUrl.await().toString()
-                }
-
-                db.collection("usuarios").document(uid).update(updates).await()
-                cargarPerfil()
-                _isUploading.value = false
-                onSuccess()
-
-            } catch (e: Exception) {
-                _isUploading.value = false
-                onError(e.localizedMessage ?: "Error al subir los documentos.")
-            }
-        }
-    }
-
-    fun guardarCoberturaYPortafolio(
-        localidades: List<String>,
-        categorias: List<String>,
-        itemsPortafolio: List<ItemPortafolio>,
-        descripcion: String,
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit
-    ) {
-        val uid = auth.currentUser?.uid ?: run {
-            onError("Usuario no autenticado.")
-            return
-        }
-
-        _isUploading.value = true
-
-        viewModelScope.launch {
-            try {
-                val urlsAnteriores = _uiState.value?.portafolioUrls ?: emptyList()
-
-                val urlsConservadas = itemsPortafolio
-                    .mapNotNull { it.uri?.toString() }
-                    .filter { it.startsWith("http://") || it.startsWith("https://") }
-
-                val urlsABorrar = urlsAnteriores.filter { url -> !urlsConservadas.contains(url) }
-
-                urlsABorrar.forEach { url ->
-                    try {
-                        storage.getReferenceFromUrl(url).delete().await()
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
-
-                val urlsFinales = mutableListOf<String>()
-
-                itemsPortafolio.forEachIndexed { index, item ->
-                    val uri = item.uri
-                    if (uri != null) {
-                        val uriString = uri.toString()
-                        if (uriString.startsWith("http://") || uriString.startsWith("https://")) {
-                            urlsFinales.add(uriString)
-                        } else {
-                            val ext = if (item.esVideo) "mp4" else "jpg"
-                            val ref = storage.reference.child("usuarios/$uid/portafolio/item_${System.currentTimeMillis()}_$index.$ext")
-                            ref.putFile(uri).await()
-                            val urlDescarga = ref.downloadUrl.await().toString()
-                            urlsFinales.add(urlDescarga)
-                        }
-                    }
-                }
-
-                val updates = mapOf(
-                    "localidades" to localidades,
-                    "categorias" to categorias,
-                    "portafolioUrls" to urlsFinales,
-                    "descripcion" to descripcion
-                )
-
-                db.collection("usuarios").document(uid).set(updates, SetOptions.merge()).await()
-                cargarPerfil()
-                _isUploading.value = false
-                onSuccess()
-
-            } catch (e: Exception) {
-                _isUploading.value = false
-                onError(e.localizedMessage ?: "Error al guardar el portafolio.")
             }
         }
     }

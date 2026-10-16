@@ -6,14 +6,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BusinessCenter
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.livedata.observeAsState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -37,32 +37,29 @@ fun ProviderMainContainer(
     val context = LocalContext.current
     val currentUserId = remember { FirebaseAuth.getInstance().currentUser?.uid ?: "" }
 
-    // Obtenemos el estado del perfil desde el ViewModel
     val uiStateState = viewModel.uiState.observeAsState(EstadoProveedorUiState())
     val uiState = uiStateState.value ?: EstadoProveedorUiState()
 
-    // Obtenemos la lista en vivo de TODAS las solicitudes disponibles en sus categorías
     val solicitudesDisponibles by viewModel.getSolicitudesDisponibles(
         misCategorias = uiState.categorias,
         misLocalidades = emptyList()
     ).collectAsState(initial = emptyList())
 
-    // NAVEGACIÓN PRINCIPAL
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Trabajos, 1: Mensajes, 2: Historial, 3: Perfil
+    // 🟢 Evalúa si el prestador aprobado requiere completar su configuración inicial
+    val requiereOnboarding = remember(uiState.localidades, uiState.descripcion, uiState.portafolioUrls) {
+        uiState.localidades.isEmpty() || uiState.descripcion.isBlank()
+    }
+
+    var selectedTab by remember { mutableIntStateOf(0) }
     var subPantallaPerfil by remember { mutableStateOf("PERFIL") }
 
-    // ESTADO DE CHAT EN PANTALLA COMPLETA
     var activeChat by remember { mutableStateOf<ChatItemUi?>(null) }
-
-    // DETALLE DE SOLICITUD / POSTULACIÓN
     var solicitudSeleccionada by remember { mutableStateOf<Solicitud?>(null) }
 
-    // DIÁLOGO DE RECHAZO
     var mostrarModalRechazo by remember(uiState.estadoVerificacion) {
         mutableStateOf(uiState.estadoVerificacion == "RECHAZADO")
     }
 
-    // Modal de Rechazo de Documentación
     if (uiState.estadoVerificacion == "RECHAZADO" && mostrarModalRechazo) {
         AlertDialog(
             onDismissRequest = { },
@@ -136,7 +133,6 @@ fun ProviderMainContainer(
         )
     }
 
-    // 1. SI HAY UN CHAT ACTIVO: Superpone ChatDetailScreen
     if (activeChat != null) {
         val currentChat = activeChat!!
 
@@ -174,9 +170,62 @@ fun ProviderMainContainer(
         )
     }
 
-    // 2. SI EL PRESTADOR ESTÁ APROBADO: Muestra la App Principal
     else if (uiState.estadoVerificacion == "APROBADO") {
-        if (solicitudSeleccionada != null) {
+
+        // 🟢 FLUJO PRIMERA VEZ: REDIRECCIÓN OBLIGATORIA A PORTAFOLIO Y COBERTURA
+        if (requiereOnboarding) {
+            Scaffold(
+                containerColor = Color(0xFFFAFAFA)
+            ) { paddingValues ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues)
+                ) {
+                    Surface(
+                        color = Color(0xFFFFF7ED),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFD8A8)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = Color(0xFFFF8F00),
+                                modifier = Modifier.size(28.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "¡Cuenta Aprobada! 🎉",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = Color(0xFF9A3412)
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Antes de empezar a postularte a trabajos, configura tus zonas de atención, portafolio y descripción.",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFFC2410C),
+                                    lineHeight = 16.sp
+                                )
+                            }
+                        }
+                    }
+
+                    ZonaCoberturaPortafolioContainer(
+                        viewModel = viewModel,
+                        onVolver = { }
+                    )
+                }
+            }
+        }
+
+        // 🟢 NAVEGACIÓN NORMAL UNA VEZ CONFIGURADO SU PERFIL
+        else if (solicitudSeleccionada != null) {
             DetalleSolicitudScreen(
                 solicitud = solicitudSeleccionada!!,
                 onBack = { solicitudSeleccionada = null },
@@ -353,7 +402,6 @@ fun ProviderMainContainer(
             }
         }
     }
-    // 3. SI AÚN NO ESTÁ APROBADO: Muestra la pantalla de estado
     else {
         ProviderNonApprovedScreen(
             uiState = uiState,
