@@ -11,6 +11,7 @@ import com.google.firebase.Timestamp
 import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.storage.FirebaseStorage
 import com.servixyabogota.data.model.Solicitud
@@ -64,17 +65,102 @@ class ClientViewModel : ViewModel() {
     var estaCargandoResenas by mutableStateOf(false)
         private set
 
+    private var resenasUserListener: ListenerRegistration? = null
+    private var resenasOtorgadasListener: ListenerRegistration? = null
+    private var resenasRecibidasListener: ListenerRegistration? = null
+    private var prestadoresListener: ListenerRegistration? = null
+
     init {
         cargarPerfilCliente()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        resenasUserListener?.remove()
+        resenasOtorgadasListener?.remove()
+        resenasRecibidasListener?.remove()
+        prestadoresListener?.remove()
+    }
+
+    /**
+     * Limpia completamente los datos de la memoria y consulta el perfil del usuario actual
+     */
+    fun cargarPerfilCliente() {
+        val user = auth.currentUser
+        if (user == null) {
+            limpiarEstadoLocal()
+            return
+        }
+
+        // 🟢 LIMPIEZA INMEDIATA DE MEMORIA PARA EVITAR LEAK DE DATOS
+        limpiarEstadoLocal()
+        estaCargando = true
+
+        db.collection("usuarios").document(user.uid)
+            .get()
+            .addOnSuccessListener { doc ->
+                if (doc != null && doc.exists()) {
+                    val nombreCompletoDoc = doc.getString("nombreCompleto")
+                    val primerNombre = doc.getString("nombre") ?: doc.getString("primerNombre") ?: ""
+                    val apellido = doc.getString("apellido") ?: doc.getString("apellidos") ?: ""
+                    val nameAttr = doc.getString("name") ?: ""
+
+                    nombre = when {
+                        !nombreCompletoDoc.isNullOrBlank() -> nombreCompletoDoc
+                        primerNombre.isNotBlank() && apellido.isNotBlank() -> "$primerNombre $apellido"
+                        primerNombre.isNotBlank() -> primerNombre
+                        nameAttr.isNotBlank() -> nameAttr
+                        else -> user.displayName ?: ""
+                    }
+
+                    telefono = doc.getString("telefono") ?: doc.getString("phone") ?: ""
+                    correo = doc.getString("correo") ?: doc.getString("email") ?: user.email ?: ""
+                    ciudad = doc.getString("ciudad") ?: doc.getString("city") ?: "Bogotá, D.C."
+                    fotoUrl = doc.getString("fotoUrl")
+                        ?: doc.getString("photoUrl")
+                                ?: doc.getString("fotoPerfilUrl")
+                                ?: user.photoUrl?.toString()
+                                ?: ""
+                    tipoCliente = doc.getString("tipoCliente") ?: "Cliente Residencial"
+                } else {
+                    correo = user.email ?: ""
+                    nombre = user.displayName ?: ""
+                    fotoUrl = user.photoUrl?.toString() ?: ""
+                }
+                estaCargando = false
+            }
+            .addOnFailureListener {
+                estaCargando = false
+            }
+
+        // Reiniciar escuchadores con el nuevo UID
         cargarPrestadores()
         escucharResenas()
+    }
+
+    private fun limpiarEstadoLocal() {
+        nombre = ""
+        telefono = ""
+        correo = ""
+        ciudad = "Bogotá, D.C."
+        fotoUrl = ""
+        tipoCliente = "Cliente Residencial"
+        promedioCalificacion = 0.0
+        totalResenasCount = 0
+        listaResenasOtorgadas = emptyList()
+        listaResenasRecibidas = emptyList()
+        listaPrestadores = emptyList()
     }
 
     fun escucharResenas() {
         val uid = auth.currentUser?.uid ?: return
         estaCargandoResenas = true
 
-        db.collection("usuarios").document(uid)
+        resenasUserListener?.remove()
+        resenasOtorgadasListener?.remove()
+        resenasRecibidasListener?.remove()
+
+        resenasUserListener = db.collection("usuarios").document(uid)
             .addSnapshotListener { snapshot, _ ->
                 if (snapshot != null && snapshot.exists()) {
                     promedioCalificacion = snapshot.getDouble("calificacion")
@@ -84,7 +170,7 @@ class ClientViewModel : ViewModel() {
                 }
             }
 
-        db.collection("resenas")
+        resenasOtorgadasListener = db.collection("resenas")
             .whereEqualTo("autorId", uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -205,7 +291,7 @@ class ClientViewModel : ViewModel() {
                 }
             }
 
-        db.collection("resenas")
+        resenasRecibidasListener = db.collection("resenas")
             .whereEqualTo("destinatarioId", uid)
             .whereEqualTo("tipo", "PRESTADOR_A_CLIENTE")
             .addSnapshotListener { snapshot, error ->
@@ -309,13 +395,11 @@ class ClientViewModel : ViewModel() {
             }
     }
 
-    /**
-     * Carga únicamente prestadores con cuentas activas y estado de verificación APROBADO o VERIFICADO
-     */
     fun cargarPrestadores() {
         estaCargandoPrestadores = true
+        prestadoresListener?.remove()
 
-        db.collection("usuarios")
+        prestadoresListener = db.collection("usuarios")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     estaCargandoPrestadores = false
@@ -334,14 +418,12 @@ class ClientViewModel : ViewModel() {
                         val esPrestador = rol.equals("PRESTADOR", ignoreCase = true) ||
                                 categoriasList.isNotEmpty()
 
-                        // 1. Verificación de Aprobación
                         val estadoVerificacion = doc.getString("estadoVerificacion")
                             ?: doc.getString("estado_verificacion")
                             ?: ""
                         val estaAprobado = estadoVerificacion.equals("APROBADO", ignoreCase = true) ||
                                 estadoVerificacion.equals("VERIFICADO", ignoreCase = true)
 
-                        // 2. Verificación de Estado de Cuenta (Filtra inhabilitados o eliminados)
                         val activo = doc.getBoolean("activo") ?: true
                         val estadoCuenta = doc.getString("estadoCuenta") ?: doc.getString("estado") ?: ""
                         val estaDeshabilitado = !activo ||
@@ -369,7 +451,6 @@ class ClientViewModel : ViewModel() {
                             else -> "Prestador ServixYa"
                         }
 
-                        // 3. Foto de perfil real (Soporta múltiples campos de foto)
                         val foto = doc.getString("fotoUrl")
                             ?: doc.getString("photoUrl")
                             ?: doc.getString("fotoPerfilUrl")
@@ -467,44 +548,6 @@ class ClientViewModel : ViewModel() {
         }.addOnFailureListener { e ->
             onError(e.localizedMessage ?: "Error al verificar la conversación")
         }
-    }
-
-    fun cargarPerfilCliente() {
-        val user = auth.currentUser ?: return
-        estaCargando = true
-
-        db.collection("usuarios").document(user.uid)
-            .get()
-            .addOnSuccessListener { doc ->
-                if (doc != null && doc.exists()) {
-                    val nombreCompletoDoc = doc.getString("nombreCompleto")
-                    val primerNombre = doc.getString("nombre") ?: doc.getString("primerNombre") ?: ""
-                    val apellido = doc.getString("apellido") ?: doc.getString("apellidos") ?: ""
-                    val nameAttr = doc.getString("name") ?: ""
-
-                    nombre = when {
-                        !nombreCompletoDoc.isNullOrBlank() -> nombreCompletoDoc
-                        primerNombre.isNotBlank() && apellido.isNotBlank() -> "$primerNombre $apellido"
-                        primerNombre.isNotBlank() -> primerNombre
-                        nameAttr.isNotBlank() -> nameAttr
-                        else -> user.displayName ?: ""
-                    }
-
-                    telefono = doc.getString("telefono") ?: doc.getString("phone") ?: ""
-                    correo = doc.getString("correo") ?: doc.getString("email") ?: user.email ?: ""
-                    ciudad = doc.getString("ciudad") ?: doc.getString("city") ?: "Bogotá, D.C."
-                    fotoUrl = doc.getString("fotoUrl") ?: doc.getString("photoUrl") ?: user.photoUrl?.toString() ?: ""
-                    tipoCliente = doc.getString("tipoCliente") ?: "Cliente Residencial"
-                } else {
-                    correo = user.email ?: ""
-                    nombre = user.displayName ?: ""
-                    fotoUrl = user.photoUrl?.toString() ?: ""
-                }
-                estaCargando = false
-            }
-            .addOnFailureListener {
-                estaCargando = false
-            }
     }
 
     fun guardarCambiosPerfil(
@@ -731,6 +774,7 @@ class ClientViewModel : ViewModel() {
 
     fun cerrarSesion(onLogout: () -> Unit) {
         auth.signOut()
+        limpiarEstadoLocal()
         onLogout()
     }
 

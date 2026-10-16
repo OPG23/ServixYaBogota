@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.google.firebase.auth.FirebaseAuth
 import java.util.Locale
 
 private fun obtenerIniciales(nombre: String): String {
@@ -44,6 +45,12 @@ fun ClientHomeScreen(
     onIniciarChat: (ClientProviderModel) -> Unit = {},
     onVerPerfilPrestador: (ClientProviderModel) -> Unit = {}
 ) {
+    // 🟢 RECARGA REACTIVA Y LIMPIEZA DE DATOS AL ENTRAR O CAMBIAR DE USUARIO
+    val currentUid = remember { FirebaseAuth.getInstance().currentUser?.uid }
+    LaunchedEffect(currentUid) {
+        viewModel.cargarPerfilCliente()
+    }
+
     var searchQuery by remember { mutableStateOf("") }
     var categoriaSeleccionada by remember { mutableStateOf("") }
     var ordenarPorCalificacion by remember { mutableStateOf(false) }
