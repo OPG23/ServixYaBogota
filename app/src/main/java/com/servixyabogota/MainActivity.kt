@@ -4,9 +4,16 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import com.servixyabogota.ui.admin.AdminUsersContainer
 import com.servixyabogota.ui.admin.AdminVerificationScreen
 import com.servixyabogota.ui.admin.AdminViewModel
@@ -31,9 +38,27 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             ServixYaBogotaTheme {
-                var currentScreen by remember { mutableStateOf("onboarding") }
+                var currentScreen by remember { mutableStateOf("cargando_sesion") }
+
+                // Comprobación de sesión al iniciar la App
+                LaunchedEffect(Unit) {
+                    authViewModel.verificarSesionActiva { pantalla ->
+                        currentScreen = pantalla
+                    }
+                }
 
                 when (currentScreen) {
+                    "cargando_sesion" -> {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.White),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = Color(0xFF1976D2))
+                        }
+                    }
+
                     "onboarding" -> OnboardingScreen(
                         onFinishOnboarding = {
                             authViewModel.clearAuthResult()
@@ -77,13 +102,11 @@ class MainActivity : ComponentActivity() {
                         }
                     )
 
-                    // PANTALLA DE CUENTA INHABILITADA
                     "cuenta_deshabilitada" -> {
                         AccountDisabledScreen(
                             nombreUsuario = authViewModel.usuarioActual?.nombre ?: "Usuario",
                             onCerrarSesion = {
-                                authViewModel.cerrarSesion() // Método de tu AuthViewModel para desloguear
-                                authViewModel.clearAuthResult()
+                                authViewModel.cerrarSesion()
                                 currentScreen = "login"
                             }
                         )
@@ -95,12 +118,14 @@ class MainActivity : ComponentActivity() {
                         }
                         AdminVerificationScreen(
                             viewModel = adminViewModel,
-                            onLogout = { currentScreen = "login" },
+                            onLogout = {
+                                authViewModel.cerrarSesion()
+                                currentScreen = "login"
+                            },
                             onNavigateToUsuarios = { currentScreen = "admin_users" }
                         )
                     }
 
-                    // PANTALLA DE GESTIÓN DE USUARIOS (ADMIN)
                     "admin_users" -> {
                         AdminUsersContainer(
                             viewModel = adminViewModel,
@@ -109,7 +134,6 @@ class MainActivity : ComponentActivity() {
                     }
 
                     "home_prestador" -> {
-                        // Refresca el estado real del usuario cada vez que entra a esta pantalla
                         LaunchedEffect(Unit) {
                             providerViewModel.cargarPerfil()
                         }
@@ -118,7 +142,10 @@ class MainActivity : ComponentActivity() {
                             onIrACorregirDocumentos = {
                                 currentScreen = "cargar_documentos"
                             },
-                            onLogout = { currentScreen = "login" }
+                            onLogout = {
+                                authViewModel.cerrarSesion()
+                                currentScreen = "login"
+                            }
                         )
                     }
 
@@ -132,7 +159,10 @@ class MainActivity : ComponentActivity() {
                     )
 
                     "home_cliente" -> ClientMainContainer(
-                        onLogout = { currentScreen = "login" }
+                        onLogout = {
+                            authViewModel.cerrarSesion()
+                            currentScreen = "login"
+                        }
                     )
                 }
             }

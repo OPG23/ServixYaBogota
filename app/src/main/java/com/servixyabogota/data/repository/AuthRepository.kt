@@ -14,6 +14,35 @@ class AuthRepository {
     }
 
     /**
+     * Retorna el UID del usuario autenticado en el dispositivo (si existe).
+     */
+    fun getCurrentUid(): String? {
+        return auth.currentUser?.uid
+    }
+
+    /**
+     * Obtiene el perfil del usuario actualmente autenticado desde Firestore.
+     */
+    suspend fun getUsuarioActual(): Result<User> {
+        return try {
+            val uid = auth.currentUser?.uid ?: throw Exception("No hay sesión activa")
+            val doc = db.collection(USERS_COLLECTION).document(uid).get().await()
+            val user = doc.toObject(User::class.java) ?: throw Exception("Usuario no encontrado")
+            val userConUid = user.copy(uid = uid)
+            Result.success(userConUid)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Cierra la sesión en Firebase Authentication.
+     */
+    fun logout() {
+        auth.signOut()
+    }
+
+    /**
      * Consulta si la cédula ya existe registrada bajo un mismo rol.
      */
     suspend fun existeCedulaConRol(cedula: String, rol: String): Boolean {
@@ -31,7 +60,6 @@ class AuthRepository {
 
     suspend fun registerUser(user: User, password: String): Result<String> {
         return try {
-            // 1. Validar si ya existe la cédula con ese mismo rol
             val existe = existeCedulaConRol(user.cedula, user.rol)
             if (existe) {
                 val rolTexto = if (user.rol == "prestador") "Prestador" else "Cliente"
@@ -40,12 +68,10 @@ class AuthRepository {
                 )
             }
 
-            // 2. Si no existe para ese rol, procede con la creación de la cuenta
             val creds = auth.createUserWithEmailAndPassword(user.email, password).await()
             val uid = creds.user?.uid ?: throw Exception("Error al obtener UID")
             val newUser = user.copy(uid = uid)
 
-            // 3. Guarda en la colección "usuarios"
             db.collection(USERS_COLLECTION).document(uid).set(newUser).await()
             Result.success(newUser.rol)
         } catch (e: Exception) {

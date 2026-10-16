@@ -74,7 +74,9 @@ fun ClientReviewsScreen(
                     val calif = snapshot.getDouble("calificacion")
                         ?: snapshot.getDouble("promedioCalificacion")
                         ?: 0.0
-                    val total = snapshot.getLong("totalResenas")?.toInt() ?: 0
+                    val total = snapshot.getLong("totalResenas")?.toInt()
+                        ?: snapshot.getLong("totalEvaluaciones")?.toInt()
+                        ?: 0
 
                     promedioCliente = calif
                     totalEvaluacionesCliente = total
@@ -111,30 +113,21 @@ fun ClientReviewsScreen(
 
                         // CLASIFICACIÓN RIGUROSA: Determinar si la reseña fue recibida o dada
                         val esRecibida: Boolean = when {
-                            // 1. Prioridad por tipo de reseña explícito
                             tipo == "PRESTADOR_A_CLIENTE" -> true
                             tipo == "CLIENTE_A_PRESTADOR" -> false
-
-                            // 2. Prioridad por autoría explícita
                             autorId.isNotBlank() && autorId == currentUserId -> false
                             autorId.isNotBlank() && autorId != currentUserId -> true
-
-                            // 3. Prioridad por destinatario explícito
                             destinatarioId.isNotBlank() && destinatarioId == currentUserId -> true
                             destinatarioId.isNotBlank() && destinatarioId != currentUserId -> false
-
-                            // 4. Fallback para documentos sin campos estandarizados
                             else -> doc.contains("clienteFotoUrl") || doc.contains("clienteFoto")
                         }
 
-                        // Determinar el ID del prestador a consultar
                         val idPrestador = if (esRecibida) {
                             autorId.ifBlank { prestadorIdDoc }
                         } else {
                             destinatarioId.ifBlank { prestadorIdDoc }
                         }
 
-                        // Buscar datos actualizados del prestador en la colección /usuarios
                         var nombreCompleto = ""
                         var fotoUrl = ""
 
@@ -157,7 +150,6 @@ fun ClientReviewsScreen(
                             } catch (_: Exception) { }
                         }
 
-                        // Fallbacks de nombre y foto si no existen en /usuarios
                         if (nombreCompleto.isBlank()) {
                             nombreCompleto = if (esRecibida) {
                                 doc.getString("autorNombre")
@@ -256,13 +248,20 @@ fun ClientReviewsScreen(
                 )
             }
 
-            // 2. TARJETA DE RESUMEN DE REPUTACIÓN
+            // 2. TARJETA DE RESUMEN DE REPUTACIÓN (CORREGIDO)
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(16.dp),
                 border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
                 modifier = Modifier.fillMaxWidth()
             ) {
+                val tieneCalificaciones = totalEvaluacionesCliente > 0 && promedioCliente > 0.0
+                val calificacionTexto = if (tieneCalificaciones) {
+                    String.format(Locale.US, "%.1f", promedioCliente)
+                } else {
+                    "-.-"
+                }
+
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -277,14 +276,14 @@ fun ClientReviewsScreen(
                         Icon(
                             imageVector = Icons.Filled.Star,
                             contentDescription = null,
-                            tint = Color(0xFFF59E0B),
+                            tint = if (tieneCalificaciones) Color(0xFFF59E0B) else Color(0xFFCBD5E1),
                             modifier = Modifier.size(28.dp)
                         )
                         Text(
-                            text = if (promedioCliente > 0) String.format(Locale.US, "%.1f", promedioCliente) else "5.0",
+                            text = calificacionTexto,
                             fontSize = 26.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFFF59E0B)
+                            color = if (tieneCalificaciones) Color(0xFFF59E0B) else Color(0xFF64748B)
                         )
                         Text(
                             text = "como cliente",
@@ -295,7 +294,11 @@ fun ClientReviewsScreen(
                     }
 
                     Text(
-                        text = "Basado en $totalEvaluacionesCliente evaluaciones",
+                        text = if (tieneCalificaciones) {
+                            "Basado en $totalEvaluacionesCliente ${if (totalEvaluacionesCliente == 1) "evaluación" else "evaluaciones"}"
+                        } else {
+                            "Sin evaluaciones aún"
+                        },
                         fontSize = 14.sp,
                         color = Color(0xFF64748B)
                     )

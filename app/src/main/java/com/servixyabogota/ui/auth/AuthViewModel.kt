@@ -20,12 +20,56 @@ class AuthViewModel : ViewModel() {
     private val _authResult = MutableLiveData<Result<String>?>()
     val authResult: LiveData<Result<String>?> = _authResult
 
-    // 1. VARIABLE PARA GUARDAR EL USUARIO ACTUAL
     var usuarioActual by mutableStateOf<User?>(null)
         private set
 
     fun clearAuthResult() {
         _authResult.value = null
+    }
+
+    /**
+     * Verifica si existe una sesión guardada en el dispositivo al iniciar la app.
+     */
+    fun verificarSesionActiva(onFinished: (String) -> Unit) {
+        val currentUid = repository.getCurrentUid()
+        if (currentUid.isNullOrBlank()) {
+            onFinished("onboarding")
+            return
+        }
+
+        _loading.value = true
+        viewModelScope.launch {
+            try {
+                val result = repository.getUsuarioActual()
+                result.onSuccess { user ->
+                    usuarioActual = user
+                    val estado = user.estadoVerificacion.uppercase()
+                    val estaDeshabilitado = estado == "DESHABILITADO" || estado == "INHABILITADO" || estado == "DESACTIVADO"
+
+                    val pantallaDestino = if (estaDeshabilitado) {
+                        "cuenta_deshabilitada"
+                    } else {
+                        when (user.rol.lowercase()) {
+                            "administrador", "admin" -> "home_admin"
+                            "prestador" -> "home_prestador"
+                            else -> "home_cliente"
+                        }
+                    }
+                    onFinished(pantallaDestino)
+                }.onFailure {
+                    // Si falla la lectura del perfil, cerramos sesión por seguridad
+                    repository.logout()
+                    usuarioActual = null
+                    onFinished("login")
+                }
+            } catch (e: Exception) {
+                repository.logout()
+                usuarioActual = null
+                onFinished("login")
+            } finally {
+                _loading.value = false
+            }
+        }
     }
 
     fun login(email: String, pass: String) {
@@ -39,7 +83,7 @@ class AuthViewModel : ViewModel() {
             try {
                 val result = repository.loginUser(email.trim(), pass.trim())
                 result.onSuccess { user ->
-                    usuarioActual = user // Se asigna el usuario ANTES de navegar
+                    usuarioActual = user
                     _authResult.value = Result.success(user.rol)
                 }.onFailure { e ->
                     _authResult.value = Result.failure(e)
@@ -49,17 +93,6 @@ class AuthViewModel : ViewModel() {
             } finally {
                 _loading.value = false
             }
-        }
-    }
-
-    // Método opcional para obtener los datos del usuario logueado
-    private fun obtenerDatosUsuario() {
-        viewModelScope.launch {
-            try {
-                // Si tu AuthRepository tiene una función para obtener el perfil del usuario actual,
-                // asignalo aquí. Ejemplo:
-                // usuarioActual = repository.getUsuarioActual()
-            } catch (_: Exception) { }
         }
     }
 
@@ -111,17 +144,17 @@ class AuthViewModel : ViewModel() {
         }
     }
 
-    // 2. FUNCIÓN PARA CERRAR SESIÓN
+    /**
+     * Cierra la sesión activa en Firebase y limpia el estado local.
+     */
     fun cerrarSesion() {
         try {
-            // Si tu AuthRepository tiene un método para desloguear (ej: Firebase.auth.signOut()), llámalo aquí
-            // repository.logout()
+            repository.logout()
         } catch (_: Exception) { }
 
         usuarioActual = null
         clearAuthResult()
     }
-
 
     // Estado para la recuperación de contraseña
     private val _resetPasswordResult = MutableLiveData<Result<String>?>()
