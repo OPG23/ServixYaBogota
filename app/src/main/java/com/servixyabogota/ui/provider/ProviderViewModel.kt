@@ -92,7 +92,7 @@ class ProviderViewModel : ViewModel() {
         private set
     var listaResenasOtorgadas by mutableStateOf<List<ReviewItem>>(emptyList())
         private set
-    var promedioCalificacion by mutableStateOf(5.0)
+    var promedioCalificacion by mutableStateOf(0.0)
         private set
     var totalResenasCount by mutableStateOf(0)
         private set
@@ -109,18 +109,23 @@ class ProviderViewModel : ViewModel() {
     // Referencias para escuchadores y caché en tiempo real
     private val solicitudesCache = mutableMapOf<String, DocumentSnapshot>()
     private var misTrabajosGroupListener: ListenerRegistration? = null
+    private var resenasUserListener: ListenerRegistration? = null
+    private var resenasRecibidasListener: ListenerRegistration? = null
+    private var resenasOtorgadasListener: ListenerRegistration? = null
+    private var chatsDirectosListener: ListenerRegistration? = null
     private val solicitudesListenersMap = mutableMapOf<String, ListenerRegistration>()
 
     init {
         cargarPerfil()
-        escucharChatsDirectos()
-        escucharResenas()
-        escucharMisTrabajos()
     }
 
     override fun onCleared() {
         super.onCleared()
         misTrabajosGroupListener?.remove()
+        resenasUserListener?.remove()
+        resenasRecibidasListener?.remove()
+        resenasOtorgadasListener?.remove()
+        chatsDirectosListener?.remove()
         solicitudesListenersMap.values.forEach { it.remove() }
         solicitudesListenersMap.clear()
         solicitudesCache.clear()
@@ -130,15 +135,23 @@ class ProviderViewModel : ViewModel() {
         val uid = auth.currentUser?.uid ?: return
         estaCargandoResenas = true
 
-        db.collection("usuarios").document(uid)
+        resenasUserListener?.remove()
+        resenasRecibidasListener?.remove()
+        resenasOtorgadasListener?.remove()
+
+        resenasUserListener = db.collection("usuarios").document(uid)
             .addSnapshotListener { snapshot, _ ->
                 if (snapshot != null && snapshot.exists()) {
-                    promedioCalificacion = snapshot.getDouble("calificacion") ?: 5.0
-                    totalResenasCount = snapshot.getLong("totalResenas")?.toInt() ?: 0
+                    promedioCalificacion = snapshot.getDouble("calificacion")
+                        ?: snapshot.getDouble("promedioCalificacion")
+                                ?: 0.0
+                    totalResenasCount = snapshot.getLong("totalResenas")?.toInt()
+                        ?: snapshot.getLong("totalEvaluaciones")?.toInt()
+                                ?: 0
                 }
             }
 
-        db.collection("resenas")
+        resenasRecibidasListener = db.collection("resenas")
             .whereEqualTo("prestadorId", uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null || snapshot.documents.isEmpty()) {
@@ -253,7 +266,7 @@ class ProviderViewModel : ViewModel() {
                 }
             }
 
-        db.collection("resenas")
+        resenasOtorgadasListener = db.collection("resenas")
             .whereEqualTo("autorId", uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null || snapshot.documents.isEmpty()) {
@@ -368,7 +381,9 @@ class ProviderViewModel : ViewModel() {
         val uid = auth.currentUser?.uid ?: return
         estaCargandoChats = true
 
-        db.collection("chats")
+        chatsDirectosListener?.remove()
+
+        chatsDirectosListener = db.collection("chats")
             .whereEqualTo("prestadorId", uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -453,6 +468,22 @@ class ProviderViewModel : ViewModel() {
 
     fun cargarPerfil() {
         val uid = auth.currentUser?.uid ?: return
+
+        // Limpiar estado previo para evitar mostrar datos del usuario anterior
+        _uiState.value = EstadoProveedorUiState()
+        promedioCalificacion = 0.0
+        totalResenasCount = 0
+        listaResenasRecibidas = emptyList()
+        listaResenasOtorgadas = emptyList()
+        listaMisTrabajosActivos = emptyList()
+        listaHistorialTrabajos = emptyList()
+        listaChatsDirectos = emptyList()
+
+        // Reiniciar escuchadores
+        escucharChatsDirectos()
+        escucharResenas()
+        escucharMisTrabajos()
+
         viewModelScope.launch {
             try {
                 val snapshot = db.collection("usuarios").document(uid).get().await()
@@ -742,7 +773,7 @@ class ProviderViewModel : ViewModel() {
                     val nombrePrestador = docPrestador.getString("nombreCompleto")
                         ?: docPrestador.getString("nombre") ?: "Prestador ServixYa"
                     val fotoPrestador = docPrestador.getString("fotoUrl") ?: ""
-                    val calificacion = docPrestador.getDouble("calificacion") ?: 5.0
+                    val calificacion = docPrestador.getDouble("calificacion") ?: 0.0
                     val totalResenas = docPrestador.getLong("totalResenas")?.toInt() ?: 0
 
                     val datosPropuesta = hashMapOf(
@@ -815,16 +846,12 @@ class ProviderViewModel : ViewModel() {
             }
     }
 
-    /**
-     * Escuchador global y reactivo en tiempo real para Postulados, Aceptados y Completados/Calificados
-     */
     fun escucharMisTrabajos() {
         val uid = auth.currentUser?.uid ?: return
         estaCargandoMisTrabajos = true
 
         val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
 
-        // Limpiar escuchadores previos
         misTrabajosGroupListener?.remove()
         solicitudesListenersMap.values.forEach { it.remove() }
         solicitudesListenersMap.clear()
@@ -856,7 +883,6 @@ class ProviderViewModel : ViewModel() {
 
                 val actualSolicitudIds = propuestasMap.keys
 
-                // Eliminar escuchadores de solicitudes obsoletas
                 val idsToRemove = solicitudesListenersMap.keys.filter { it !in actualSolicitudIds }
                 idsToRemove.forEach { id ->
                     solicitudesListenersMap[id]?.remove()
@@ -864,7 +890,6 @@ class ProviderViewModel : ViewModel() {
                     solicitudesCache.remove(id)
                 }
 
-                // Función desacoplada para recalcular listas en tiempo real
                 fun procesarYRefrescar() {
                     val activosTemp = mutableListOf<TrabajoItemUI>()
                     val historialTemp = mutableListOf<TrabajoItemUI>()
@@ -883,7 +908,6 @@ class ProviderViewModel : ViewModel() {
                                 sDoc.getString("prestadorId") == uid ||
                                 sDoc.getString("proveedorId") == uid
 
-                        // Verificación si el trabajo ya fue completado o calificado
                         val esFinalizado = estadoSolUpper in estadosCompletados ||
                                 estProp in estadosCompletados ||
                                 sDoc.getBoolean("calificado") == true ||
@@ -953,7 +977,6 @@ class ProviderViewModel : ViewModel() {
                     listaHistorialTrabajos = historialTemp
                     estaCargandoMisTrabajos = false
 
-                    // Si falta la foto, se consulta de forma asíncrona al perfil del cliente
                     val itemsSinFoto = (activosTemp + historialTemp).filter { it.clienteFotoUrl.isBlank() && it.clienteId.isNotBlank() }
                     for (item in itemsSinFoto) {
                         db.collection("usuarios").document(item.clienteId).get()
@@ -974,7 +997,6 @@ class ProviderViewModel : ViewModel() {
                     }
                 }
 
-                // Registrar escuchador activo para cada documento de solicitud
                 for (solicitudId in actualSolicitudIds) {
                     if (!solicitudesListenersMap.containsKey(solicitudId)) {
                         val listener = db.collection("solicitudes").document(solicitudId)

@@ -9,7 +9,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ExitToApp
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Star
@@ -49,15 +48,14 @@ fun PerfilProfesionalScreen(
     onGuardarCambios: (String, String) -> Unit = { _, _ -> },
     onLogout: () -> Unit = {}
 ) {
-    // 1. Datos en tiempo real desde Firestore a través del ViewModel
     val promedio = viewModel.promedioCalificacion
     val totalResenas = viewModel.totalResenasCount
-    val promedioTexto = String.format(Locale.US, "%.1f", promedio)
 
-    // Estado para controlar el diálogo de confirmación de cerrar sesión
+    val tieneCalificaciones = totalResenas > 0 && promedio > 0.0
+    val promedioTexto = if (tieneCalificaciones) String.format(Locale.US, "%.1f", promedio) else "-.-"
+
     var showLogoutDialog by remember { mutableStateOf(false) }
 
-    // Diálogo de Confirmación para Cerrar Sesión con Emojis
     if (showLogoutDialog) {
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
@@ -110,7 +108,6 @@ fun PerfilProfesionalScreen(
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Título Principal
             Text(
                 text = "Perfil Profesional",
                 fontSize = 22.sp,
@@ -118,7 +115,6 @@ fun PerfilProfesionalScreen(
                 color = Color(0xFF0F172A)
             )
 
-            // Tarjeta de Perfil
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(16.dp),
@@ -137,13 +133,12 @@ fun PerfilProfesionalScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = nombre.ifBlank { "Juan Padrino" },
+                            text = nombre.ifBlank { "Prestador ServixYa" },
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF0F172A)
                         )
 
-                        // Calificación en tiempo real
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -152,17 +147,21 @@ fun PerfilProfesionalScreen(
                             Icon(
                                 imageVector = Icons.Filled.Star,
                                 contentDescription = null,
-                                tint = Color(0xFFFF8F00),
+                                tint = if (tieneCalificaciones) Color(0xFFFF8F00) else Color(0xFFCBD5E1),
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
                                 text = promedioTexto,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFFFF8F00)
+                                color = if (tieneCalificaciones) Color(0xFFFF8F00) else Color(0xFF64748B)
                             )
                             Text(
-                                text = "($totalResenas reseña${if (totalResenas != 1) "s" else ""})",
+                                text = if (tieneCalificaciones) {
+                                    "($totalResenas reseña${if (totalResenas != 1) "s" else ""})"
+                                } else {
+                                    "(Sin reseñas)"
+                                },
                                 fontSize = 14.sp,
                                 color = Color(0xFF64748B)
                             )
@@ -223,7 +222,6 @@ fun PerfilProfesionalScreen(
                 }
             }
 
-            // SECCIÓN CONTACTO PROFESIONAL
             Text(
                 text = "CONTACTO PROFESIONAL",
                 fontSize = 12.sp,
@@ -232,7 +230,6 @@ fun PerfilProfesionalScreen(
                 modifier = Modifier.padding(top = 8.dp)
             )
 
-            // Campo Teléfono
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     text = "Teléfono de contacto profesional",
@@ -257,7 +254,7 @@ fun PerfilProfesionalScreen(
                             modifier = Modifier.size(20.dp)
                         )
                         Text(
-                            text = telefonoInicial.ifBlank { "3001234567" },
+                            text = telefonoInicial.ifBlank { "Sin registrar" },
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color(0xFF0F172A)
@@ -266,7 +263,6 @@ fun PerfilProfesionalScreen(
                 }
             }
 
-            // Campo Correo Electrónico
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     text = "Correo electrónico profesional",
@@ -291,7 +287,7 @@ fun PerfilProfesionalScreen(
                             modifier = Modifier.size(20.dp)
                         )
                         Text(
-                            text = correoInicial.ifBlank { "prestador@test.com" },
+                            text = correoInicial.ifBlank { "Sin registrar" },
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color(0xFF0F172A)
@@ -302,7 +298,6 @@ fun PerfilProfesionalScreen(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // TARJETA DE MENÚ Y OPCIONES
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(16.dp),
@@ -330,7 +325,6 @@ fun PerfilProfesionalScreen(
                 }
             }
 
-            // BOTÓN CERRAR SESIÓN
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(16.dp),
