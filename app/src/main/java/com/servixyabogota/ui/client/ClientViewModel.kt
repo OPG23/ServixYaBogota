@@ -395,6 +395,10 @@ class ClientViewModel : ViewModel() {
             }
     }
 
+    /**
+     * Carga únicamente prestadores con cuentas activas, estado APROBADO
+     * y que YA hayan completado su configuración inicial (cobertura + descripción)
+     */
     fun cargarPrestadores() {
         estaCargandoPrestadores = true
         prestadoresListener?.remove()
@@ -418,12 +422,14 @@ class ClientViewModel : ViewModel() {
                         val esPrestador = rol.equals("PRESTADOR", ignoreCase = true) ||
                                 categoriasList.isNotEmpty()
 
+                        // 1. Estado de Verificación del Administrador
                         val estadoVerificacion = doc.getString("estadoVerificacion")
                             ?: doc.getString("estado_verificacion")
                             ?: ""
                         val estaAprobado = estadoVerificacion.equals("APROBADO", ignoreCase = true) ||
                                 estadoVerificacion.equals("VERIFICADO", ignoreCase = true)
 
+                        // 2. Estado de Cuenta (Filtra inhabilitados o eliminados)
                         val activo = doc.getBoolean("activo") ?: true
                         val estadoCuenta = doc.getString("estadoCuenta") ?: doc.getString("estado") ?: ""
                         val estaDeshabilitado = !activo ||
@@ -436,7 +442,25 @@ class ClientViewModel : ViewModel() {
                                 estadoVerificacion.equals("DESACTIVADO", ignoreCase = true) ||
                                 estadoVerificacion.equals("ELIMINADO", ignoreCase = true)
 
-                        if (!esPrestador || !estaAprobado || estaDeshabilitado) return@mapNotNull null
+                        // 3. Verificación de Configuración Inicial (Onboarding Completado)
+                        @Suppress("UNCHECKED_CAST")
+                        val localidades = (doc.get("localidades") as? List<String>)
+                            ?: (doc.get("localidadesAtencion") as? List<String>)
+                            ?: emptyList()
+
+                        val descripcion = doc.getString("descripcion") ?: doc.getString("biografia") ?: ""
+
+                        @Suppress("UNCHECKED_CAST")
+                        val portafolioUrls = (doc.get("portafolioUrls") as? List<String>)
+                            ?: (doc.get("portafolio") as? List<String>)
+                            ?: emptyList()
+
+                        // Un prestador solo es visible si definió sus zonas de cobertura y su descripción profesional
+                        val haCompletadoPerfilInicial = localidades.isNotEmpty() && descripcion.isNotBlank()
+
+                        if (!esPrestador || !estaAprobado || estaDeshabilitado || !haCompletadoPerfilInicial) {
+                            return@mapNotNull null
+                        }
 
                         val nombreCompletoDoc = doc.getString("nombreCompleto")
                         val primerNombre = doc.getString("nombre") ?: doc.getString("primerNombre") ?: ""
@@ -468,20 +492,9 @@ class ClientViewModel : ViewModel() {
                             ?: 0
 
                         val disponibleHoy = doc.getBoolean("disponibleHoy") ?: doc.getBoolean("disponible") ?: true
-                        val descripcion = doc.getString("descripcion") ?: doc.getString("biografia") ?: ""
                         val experienciaAnos = doc.getLong("experienciaAnos")?.toInt()
                             ?: doc.getLong("experiencia")?.toInt()
                             ?: 1
-
-                        @Suppress("UNCHECKED_CAST")
-                        val portafolioUrls = (doc.get("portafolioUrls") as? List<String>)
-                            ?: (doc.get("portafolio") as? List<String>)
-                            ?: emptyList()
-
-                        @Suppress("UNCHECKED_CAST")
-                        val localidades = (doc.get("localidades") as? List<String>)
-                            ?: (doc.get("localidadesAtencion") as? List<String>)
-                            ?: emptyList()
 
                         ClientProviderModel(
                             id = doc.id,
