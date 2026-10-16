@@ -23,7 +23,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// Modelo UI para las reseñas del cliente
 data class ReviewItem(
     val id: String = "",
     val nombre: String = "Prestador",
@@ -41,7 +40,6 @@ class ClientViewModel : ViewModel() {
     private val storage = FirebaseStorage.getInstance()
     private val repository: SolicitudRepository = SolicitudRepository()
 
-    // Estados del perfil
     var nombre by mutableStateOf("")
     var telefono by mutableStateOf("")
     var correo by mutableStateOf("")
@@ -49,20 +47,17 @@ class ClientViewModel : ViewModel() {
     var fotoUrl by mutableStateOf("")
     var tipoCliente by mutableStateOf("Cliente Residencial")
 
-    // Estados de UI
     var estaCargando by mutableStateOf(false)
     var estaGuardando by mutableStateOf(false)
 
-    // ESTADOS PARA PRESTADORES REALES
     var listaPrestadores by mutableStateOf<List<ClientProviderModel>>(emptyList())
     var estaCargandoPrestadores by mutableStateOf(false)
 
-    // ESTADOS PARA RESEÑAS REALES DE FIRESTORE
     var listaResenasOtorgadas by mutableStateOf<List<ReviewItem>>(emptyList())
         private set
     var listaResenasRecibidas by mutableStateOf<List<ReviewItem>>(emptyList())
         private set
-    var promedioCalificacion by mutableStateOf(5.0)
+    var promedioCalificacion by mutableStateOf(0.0)
         private set
     var totalResenasCount by mutableStateOf(0)
         private set
@@ -75,25 +70,20 @@ class ClientViewModel : ViewModel() {
         escucharResenas()
     }
 
-    /**
-     * Escucha en tiempo real la reputación y las reseñas otorgadas/recibidas por el cliente
-     */
     fun escucharResenas() {
         val uid = auth.currentUser?.uid ?: return
         estaCargandoResenas = true
 
-        // 1. Escuchar promedio de estrellas y total de reseñas desde el perfil del usuario
         db.collection("usuarios").document(uid)
             .addSnapshotListener { snapshot, _ ->
                 if (snapshot != null && snapshot.exists()) {
                     promedioCalificacion = snapshot.getDouble("calificacion")
                         ?: snapshot.getDouble("promedioCalificacion")
-                                ?: 5.0
+                                ?: 0.0
                     totalResenasCount = snapshot.getLong("totalResenas")?.toInt() ?: 0
                 }
             }
 
-        // 2. Escuchar reseñas OTORGADAS por el cliente a prestadores
         db.collection("resenas")
             .whereEqualTo("autorId", uid)
             .addSnapshotListener { snapshot, error ->
@@ -215,7 +205,6 @@ class ClientViewModel : ViewModel() {
                 }
             }
 
-        // 3. Escuchar reseñas RECIBIDAS por el cliente
         db.collection("resenas")
             .whereEqualTo("destinatarioId", uid)
             .whereEqualTo("tipo", "PRESTADOR_A_CLIENTE")
@@ -321,7 +310,7 @@ class ClientViewModel : ViewModel() {
     }
 
     /**
-     * Escucha en tiempo real los perfiles de prestadores registrados en Firestore
+     * Carga únicamente prestadores con cuentas activas y estado de verificación APROBADO o VERIFICADO
      */
     fun cargarPrestadores() {
         estaCargandoPrestadores = true
@@ -343,15 +332,29 @@ class ClientViewModel : ViewModel() {
                             ?: emptyList()
 
                         val esPrestador = rol.equals("PRESTADOR", ignoreCase = true) ||
-                                rol.equals("prestador", ignoreCase = true) ||
                                 categoriasList.isNotEmpty()
 
+                        // 1. Verificación de Aprobación
                         val estadoVerificacion = doc.getString("estadoVerificacion")
                             ?: doc.getString("estado_verificacion")
                             ?: ""
-                        val estaAprobado = estadoVerificacion.equals("APROBADO", ignoreCase = true)
+                        val estaAprobado = estadoVerificacion.equals("APROBADO", ignoreCase = true) ||
+                                estadoVerificacion.equals("VERIFICADO", ignoreCase = true)
 
-                        if (!esPrestador || !estaAprobado) return@mapNotNull null
+                        // 2. Verificación de Estado de Cuenta (Filtra inhabilitados o eliminados)
+                        val activo = doc.getBoolean("activo") ?: true
+                        val estadoCuenta = doc.getString("estadoCuenta") ?: doc.getString("estado") ?: ""
+                        val estaDeshabilitado = !activo ||
+                                estadoCuenta.equals("DESHABILITADO", ignoreCase = true) ||
+                                estadoCuenta.equals("INHABILITADO", ignoreCase = true) ||
+                                estadoCuenta.equals("DESACTIVADO", ignoreCase = true) ||
+                                estadoCuenta.equals("ELIMINADO", ignoreCase = true) ||
+                                estadoVerificacion.equals("DESHABILITADO", ignoreCase = true) ||
+                                estadoVerificacion.equals("INHABILITADO", ignoreCase = true) ||
+                                estadoVerificacion.equals("DESACTIVADO", ignoreCase = true) ||
+                                estadoVerificacion.equals("ELIMINADO", ignoreCase = true)
+
+                        if (!esPrestador || !estaAprobado || estaDeshabilitado) return@mapNotNull null
 
                         val nombreCompletoDoc = doc.getString("nombreCompleto")
                         val primerNombre = doc.getString("nombre") ?: doc.getString("primerNombre") ?: ""
@@ -366,11 +369,19 @@ class ClientViewModel : ViewModel() {
                             else -> "Prestador ServixYa"
                         }
 
-                        val foto = doc.getString("fotoUrl") ?: doc.getString("photoUrl") ?: ""
+                        // 3. Foto de perfil real (Soporta múltiples campos de foto)
+                        val foto = doc.getString("fotoUrl")
+                            ?: doc.getString("photoUrl")
+                            ?: doc.getString("fotoPerfilUrl")
+                            ?: doc.getString("fotoPerfil")
+                            ?: doc.getString("foto")
+                            ?: ""
+
                         val calificacion = doc.getDouble("calificacion")
                             ?: doc.getDouble("promedioCalificacion")
                             ?: doc.getDouble("rating")
-                            ?: 5.0
+                            ?: 0.0
+
                         val totalResenas = doc.getLong("totalResenas")?.toInt()
                             ?: doc.getLong("numeroResenas")?.toInt()
                             ?: 0
@@ -413,9 +424,6 @@ class ClientViewModel : ViewModel() {
             }
     }
 
-    /**
-     * Crea un canal de chat directo en Firestore entre el cliente y el prestador
-     */
     fun obtenerOCrearChatDirecto(
         prestadorId: String,
         onSuccess: (chatId: String) -> Unit,
@@ -461,9 +469,6 @@ class ClientViewModel : ViewModel() {
         }
     }
 
-    /**
-     * Carga la información del usuario cliente
-     */
     fun cargarPerfilCliente() {
         val user = auth.currentUser ?: return
         estaCargando = true
@@ -502,9 +507,6 @@ class ClientViewModel : ViewModel() {
             }
     }
 
-    /**
-     * Actualiza el perfil en Firebase Storage y Firestore
-     */
     fun guardarCambiosPerfil(
         nuevoNombre: String,
         nuevoTelefono: String,
@@ -684,10 +686,6 @@ class ClientViewModel : ViewModel() {
         }
     }
 
-    /**
-     * Acepta la oferta de un prestador para una solicitud.
-     * Cambia la solicitud a estado EN_PROCESO y asigna al prestador para que le aparezca en Trabajos Actuales.
-     */
     fun aceptarPropuesta(
         solicitudId: String,
         propuestaId: String,
@@ -791,9 +789,6 @@ class ClientViewModel : ViewModel() {
             }
     }
 
-    // ==========================================
-    // ESTADOS Y CÓDIGO PARA VER RESEÑAS PÚBLICAS DEL PRESTADOR
-    // ==========================================
     var listaResenasDelPrestador by mutableStateOf<List<ReviewItem>>(emptyList())
         private set
 

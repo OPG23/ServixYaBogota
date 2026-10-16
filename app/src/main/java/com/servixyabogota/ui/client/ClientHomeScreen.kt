@@ -26,7 +26,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import java.util.Locale
 
-// Función auxiliar para generar las iniciales (Ej: "Juan Manco" -> "JM")
 private fun obtenerIniciales(nombre: String): String {
     if (nombre.isBlank()) return "U"
     val partes = nombre.trim().split("\\s+".toRegex())
@@ -131,7 +130,6 @@ fun ClientHomeScreen(
                         )
                     }
 
-                    // 🟢 FOTO DE PERFIL O INICIALES DEL CLIENTE
                     if (viewModel.fotoUrl.isNotBlank()) {
                         AsyncImage(
                             model = viewModel.fotoUrl,
@@ -143,9 +141,7 @@ fun ClientHomeScreen(
                                 .border(1.dp, Color(0xFFE2E8F0), CircleShape)
                         )
                     } else {
-                        // Obtiene el nombre desde el ViewModel (ejemplo: viewModel.nombre)
                         val iniciales = obtenerIniciales(viewModel.nombre)
-
                         Box(
                             modifier = Modifier
                                 .size(40.dp)
@@ -425,7 +421,6 @@ private fun ProviderCard(
 
                 Spacer(modifier = Modifier.width(14.dp))
 
-                // Información
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = prestador.nombre,
@@ -436,7 +431,6 @@ private fun ProviderCard(
 
                     Spacer(modifier = Modifier.height(4.dp))
 
-                    // Calificación y Reseñas
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.Star,
@@ -461,7 +455,6 @@ private fun ProviderCard(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Categorías
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         prestador.categorias.take(2).forEach { cat ->
                             Surface(
@@ -487,7 +480,6 @@ private fun ProviderCard(
             HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Barra Inferior: Estado y Botón de Chat
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
