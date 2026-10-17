@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.sp
 fun AccountDisabledScreen(
     nombreUsuario: String,
     onCerrarSesion: () -> Unit,
-    correoSoporte: String = "soporte@servixyabogota.com"
+    correoSoporte: String = "servixyabogota@gmail.com"
 ) {
     val context = LocalContext.current
 

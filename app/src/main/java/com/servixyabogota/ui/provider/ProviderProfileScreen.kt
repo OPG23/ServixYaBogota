@@ -1,5 +1,8 @@
 package com.servixyabogota.ui.provider
 
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -14,6 +17,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Phone
@@ -27,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,6 +53,7 @@ fun PerfilProfesionalScreen(
     onGuardarCambios: (String, String) -> Unit = { _, _ -> },
     onLogout: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     val promedio = viewModel.promedioCalificacion
     val totalResenas = viewModel.totalResenasCount
 
@@ -321,6 +327,22 @@ fun PerfilProfesionalScreen(
                         icon = Icons.Outlined.WorkOutline,
                         titulo = "Zona de Cobertura y Portafolio",
                         onClick = onIrAZonaCobertura
+                    )
+                    HorizontalDivider(color = Color(0xFFF1F5F9))
+                    OpcionPerfilItem(
+                        icon = Icons.Outlined.HelpOutline,
+                        titulo = "Contactar a Soporte",
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_SENDTO).apply {
+                                data = Uri.parse("mailto:servixyabogota@gmail.com")
+                                putExtra(Intent.EXTRA_SUBJECT, "Soporte Prestador ServixYa - ${nombre.ifBlank { "Prestador" }}")
+                            }
+                            try {
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "No se encontró una aplicación de correo instalada", Toast.LENGTH_SHORT).show()
+                            }
+                        }
                     )
                 }
             }

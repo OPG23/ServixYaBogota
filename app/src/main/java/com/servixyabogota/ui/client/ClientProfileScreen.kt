@@ -1,5 +1,6 @@
 package com.servixyabogota.ui.client
 
+import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -49,7 +50,6 @@ fun ClientProfileScreen(
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var showLogoutDialog by remember { mutableStateOf(false) }
 
-    // Launcher para seleccionar la foto desde la galería
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -199,7 +199,6 @@ fun ClientProfileScreen(
                             fontSize = 32.sp
                         )
 
-                        // Botón de cámara
                         Box(
                             modifier = Modifier
                                 .size(30.dp)
@@ -260,7 +259,6 @@ fun ClientProfileScreen(
 
                 // CAMPOS DE EDICIÓN
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    // NOMBRE COMPLETO (BLOQUEADO / LECTURA ÚNICAMENTE)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             text = "NOMBRE COMPLETO",
@@ -293,7 +291,6 @@ fun ClientProfileScreen(
                         )
                     }
 
-                    // TELÉFONO MÓVIL
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             text = "TELÉFONO MÓVIL",
@@ -326,7 +323,6 @@ fun ClientProfileScreen(
                         )
                     }
 
-                    // CORREO ELECTRÓNICO (BLOQUEADO / SIN TEXTO DE VERIFICADO)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             text = "CORREO ELECTRÓNICO",
@@ -360,7 +356,7 @@ fun ClientProfileScreen(
                     }
                 }
 
-                // OPCIONES DE CONFIGURACIÓN
+                // OPCIONES DE CONFIGURACIÓN Y SOPORTE
                 Surface(
                     color = Color.White,
                     shape = RoundedCornerShape(16.dp),
@@ -414,6 +410,47 @@ fun ClientProfileScreen(
                             )
                             Text(
                                 text = "Mis Calificaciones y Reseñas",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF0F172A),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = Color(0xFF94A3B8)
+                            )
+                        }
+
+                        HorizontalDivider(color = Color(0xFFF1F5F9))
+
+                        // 🟢 BOTÓN DE CONTACTAR A SOPORTE
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    val intent = Intent(Intent.ACTION_SENDTO).apply {
+                                        data = Uri.parse("mailto:servixyabogota@gmail.com")
+                                        putExtra(Intent.EXTRA_SUBJECT, "Soporte Cliente ServixYa - $nombre")
+                                    }
+                                    try {
+                                        context.startActivity(intent)
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "No se encontró una aplicación de correo instalada", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.HelpOutline,
+                                contentDescription = null,
+                                tint = Color(0xFF1D4ED8),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Text(
+                                text = "Contactar a Soporte",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = Color(0xFF0F172A),
