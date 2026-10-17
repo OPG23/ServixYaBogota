@@ -17,7 +17,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.ExitToApp
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -45,7 +44,7 @@ fun ClientProfileScreen(
 ) {
     val context = LocalContext.current
 
-    var nombre by remember(viewModel.nombre) { mutableStateOf(viewModel.nombre) }
+    val nombre by remember(viewModel.nombre) { mutableStateOf(viewModel.nombre) }
     var telefono by remember(viewModel.telefono) { mutableStateOf(viewModel.telefono) }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var showLogoutDialog by remember { mutableStateOf(false) }
@@ -93,10 +92,6 @@ fun ClientProfileScreen(
                 Box(modifier = Modifier.padding(16.dp)) {
                     Button(
                         onClick = {
-                            if (nombre.isBlank()) {
-                                Toast.makeText(context, "El nombre no puede estar vacío", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
                             viewModel.guardarCambiosPerfil(
                                 nuevoNombre = nombre,
                                 nuevoTelefono = telefono,
@@ -265,6 +260,7 @@ fun ClientProfileScreen(
 
                 // CAMPOS DE EDICIÓN
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    // NOMBRE COMPLETO (BLOQUEADO / LECTURA ÚNICAMENTE)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             text = "NOMBRE COMPLETO",
@@ -274,29 +270,30 @@ fun ClientProfileScreen(
                         )
                         OutlinedTextField(
                             value = nombre,
-                            onValueChange = { nombre = it },
+                            onValueChange = {},
+                            readOnly = true,
+                            enabled = false,
                             leadingIcon = {
                                 Icon(
                                     imageVector = Icons.Outlined.Person,
                                     contentDescription = null,
-                                    tint = Color(0xFF64748B),
+                                    tint = Color(0xFF94A3B8),
                                     modifier = Modifier.size(20.dp)
                                 )
                             },
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF2563EB),
-                                unfocusedBorderColor = Color(0xFFE2E8F0),
-                                focusedContainerColor = Color.White,
-                                unfocusedContainerColor = Color.White,
-                                focusedTextColor = Color(0xFF0F172A),
-                                unfocusedTextColor = Color(0xFF0F172A)
+                                disabledBorderColor = Color(0xFFE2E8F0),
+                                disabledContainerColor = Color(0xFFF1F5F9),
+                                disabledTextColor = Color(0xFF64748B),
+                                disabledLeadingIconColor = Color(0xFF94A3B8)
                             ),
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
 
+                    // TELÉFONO MÓVIL
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             text = "TELÉFONO MÓVIL",
@@ -329,6 +326,7 @@ fun ClientProfileScreen(
                         )
                     }
 
+                    // CORREO ELECTRÓNICO (BLOQUEADO / SIN TEXTO DE VERIFICADO)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             text = "CORREO ELECTRÓNICO",
@@ -359,25 +357,6 @@ fun ClientProfileScreen(
                             ),
                             modifier = Modifier.fillMaxWidth()
                         )
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.padding(top = 2.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.CheckCircle,
-                                contentDescription = null,
-                                tint = Color(0xFF10B981),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = "Correo verificado",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color(0xFF10B981)
-                            )
-                        }
                     }
                 }
 
