@@ -312,7 +312,7 @@ class ChatViewModel : ViewModel() {
                         isLoading = false
                     )
 
-                    // 🟢 Marca mensajes individuales como leídos y limpia los flags del documento padre
+                    // 🟢 SIEMPRE limpia el contador del documento raíz en Firestore al estar viendo el chat
                     marcarMensajesComoLeidos(mensajesSinLeerList)
                 }
             }
@@ -324,6 +324,7 @@ class ChatViewModel : ViewModel() {
         val coleccionPadre = if (esChatDirecto) "chats" else "solicitudes"
         val batch = db.batch()
 
+        // 1. Marca los mensajes individuales como leídos en la subcolección
         idsMensajes.forEach { msgId ->
             val refMsg = db.collection(coleccionPadre)
                 .document(chatIdActual)
@@ -332,6 +333,7 @@ class ChatViewModel : ViewModel() {
             batch.update(refMsg, "leido", true)
         }
 
+        // 2. Reinicia SIEMPRE el contador noLeidos a 0 en el documento raíz
         val esCliente = _uiState.value.esCliente
         val campoNoLeidos = if (esCliente) "noLeidosCliente" else "noLeidosPrestador"
         val campoLeido = if (esCliente) "leidoPorCliente" else "leidoPorPrestador"
@@ -348,7 +350,6 @@ class ChatViewModel : ViewModel() {
 
         batch.commit()
     }
-
     fun enviarMensaje(
         texto: String,
         mediaUrl: String? = null,

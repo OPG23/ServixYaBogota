@@ -190,7 +190,7 @@ class ClientViewModel : ViewModel() {
         esPrimeraCargaSolicitudes = true
     }
 
-    // 🟢 ESCUCHADORES EN TIEMPO REAL (CHATS DIRECTOS + SOLICITUDES + BADGES + SIN REPETICIÓN)
+    // 🟢 ESCUCHADORES EN TIEMPO REAL (ACUMULACIÓN REAL DE MENSAJES NO LEÍDOS)
     fun iniciarEscuchadoresNotificacionesCliente() {
         val uid = auth.currentUser?.uid ?: return
 
@@ -206,13 +206,13 @@ class ClientViewModel : ViewModel() {
                 for (doc in snapshot.documents) {
                     val chatId = doc.id
                     val noLeidos = doc.getLong("noLeidosCliente")?.toInt() ?: 0
-                    val leido = doc.getBoolean("leidoPorCliente") ?: (noLeidos == 0)
                     val ultimoEmisorId = doc.getString("ultimoEmisorId") ?: ""
                     val ultimoMensaje = doc.getString("ultimoMensaje") ?: ""
                     val fechaUltimo = doc.getTimestamp("fechaUltimoMensaje")?.seconds?.toString() ?: ""
 
-                    if ((!leido || noLeidos > 0) && ultimoEmisorId.isNotBlank() && ultimoEmisorId != uid) {
-                        acumuladoDirectos += if (noLeidos > 0) noLeidos else 1
+                    // 🟢 Suma exactamente el número de mensajes sin leer
+                    if (noLeidos > 0 && ultimoEmisorId.isNotBlank() && ultimoEmisorId != uid) {
+                        acumuladoDirectos += noLeidos
 
                         val claveMensaje = "$chatId-$fechaUltimo-$ultimoMensaje"
 
@@ -237,7 +237,7 @@ class ClientViewModel : ViewModel() {
                 actualizarConteoGlobalMensajes()
             }
 
-        // 2. ESCUCHAR SOLICITUDES / TRABAJOS (Colección 'solicitudes')
+        // 2. ESCUCHAR SOLICITUDES ACTIVAS (Colección 'solicitudes')
         listenerSolicitudesNotificaciones?.remove()
         listenerSolicitudesNotificaciones = db.collection("solicitudes")
             .whereEqualTo("clienteId", uid)
@@ -272,13 +272,13 @@ class ClientViewModel : ViewModel() {
 
                     // B) DETECTAR MENSAJES DE TRABAJOS EN CURSO
                     val noLeidos = doc.getLong("noLeidosCliente")?.toInt() ?: 0
-                    val leido = doc.getBoolean("leidoPorCliente") ?: (noLeidos == 0)
                     val ultimoEmisorId = doc.getString("ultimoEmisorId") ?: ""
                     val ultimoMensaje = doc.getString("ultimoMensaje") ?: ""
                     val fechaUltimo = doc.getTimestamp("fechaUltimoMensaje")?.seconds?.toString() ?: ""
 
-                    if ((!leido || noLeidos > 0) && ultimoEmisorId.isNotBlank() && ultimoEmisorId != uid) {
-                        acumuladoSolicitudes += if (noLeidos > 0) noLeidos else 1
+                    // 🟢 Suma exactamente la cantidad real de mensajes sin leer recibidos de la contraparte
+                    if (noLeidos > 0 && ultimoEmisorId.isNotBlank() && ultimoEmisorId != uid) {
+                        acumuladoSolicitudes += noLeidos
 
                         val claveMensaje = "$solicitudId-$fechaUltimo-$ultimoMensaje"
 
