@@ -23,6 +23,19 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
+
+data class NotificacionInApp(
+    val id: String = UUID.randomUUID().toString(),
+    val titulo: String,
+    val mensaje: String,
+    val tipo: TipoNotificacion
+)
+
+enum class TipoNotificacion {
+    NUEVO_MENSAJE,
+    NUEVA_PROPUESTA
+}
 
 data class ReviewItem(
     val id: String = "",
@@ -65,10 +78,23 @@ class ClientViewModel : ViewModel() {
     var estaCargandoResenas by mutableStateOf(false)
         private set
 
+    // 🟢 ESTADOS PARA NOTIFICACIONES EN TIEMPO REAL
+    var notificacionActiva by mutableStateOf<NotificacionInApp?>(null)
+        private set
+    var tieneMensajesSinLeer by mutableStateOf(false)
+        private set
+    var tieneNuevasPropuestas by mutableStateOf(false)
+        private set
+
     private var resenasUserListener: ListenerRegistration? = null
     private var resenasOtorgadasListener: ListenerRegistration? = null
     private var resenasRecibidasListener: ListenerRegistration? = null
     private var prestadoresListener: ListenerRegistration? = null
+    private var listenerChatsNotificaciones: ListenerRegistration? = null
+    private var listenerSolicitudesNotificaciones: ListenerRegistration? = null
+
+    private val registroConteoPropuestas = mutableMapOf<String, Int>()
+    private var esPrimeraCargaSolicitudes = true
 
     init {
         cargarPerfilCliente()
@@ -80,11 +106,10 @@ class ClientViewModel : ViewModel() {
         resenasOtorgadasListener?.remove()
         resenasRecibidasListener?.remove()
         prestadoresListener?.remove()
+        listenerChatsNotificaciones?.remove()
+        listenerSolicitudesNotificaciones?.remove()
     }
 
-    /**
-     * Limpia completamente los datos de la memoria y consulta el perfil del usuario actual
-     */
     fun cargarPerfilCliente() {
         val user = auth.currentUser
         if (user == null) {
@@ -92,7 +117,6 @@ class ClientViewModel : ViewModel() {
             return
         }
 
-        // 🟢 LIMPIEZA INMEDIATA DE MEMORIA PARA EVITAR LEAK DE DATOS
         limpiarEstadoLocal()
         estaCargando = true
 
@@ -133,9 +157,9 @@ class ClientViewModel : ViewModel() {
                 estaCargando = false
             }
 
-        // Reiniciar escuchadores con el nuevo UID
         cargarPrestadores()
         escucharResenas()
+        iniciarEscuchadoresNotificacionesCliente()
     }
 
     private fun limpiarEstadoLocal() {
@@ -150,6 +174,97 @@ class ClientViewModel : ViewModel() {
         listaResenasOtorgadas = emptyList()
         listaResenasRecibidas = emptyList()
         listaPrestadores = emptyList()
+        notificacionActiva = null
+        tieneMensajesSinLeer = false
+        tieneNuevasPropuestas = false
+        registroConteoPropuestas.clear()
+        esPrimeraCargaSolicitudes = true
+    }
+
+    // 🟢 ESCUCHADORES EN TIEMPO REAL DE MENSAJES Y PROPUESTAS
+    fun iniciarEscuchadoresNotificacionesCliente() {
+        val uid = auth.currentUser?.uid ?: return
+
+        // 1. Escuchar Nuevos Mensajes
+        listenerChatsNotificaciones?.remove()
+        listenerChatsNotificaciones = db.collection("chats")
+            .whereEqualTo("clienteId", uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+
+                var haySinLeer = false
+                for (doc in snapshot.documents) {
+                    val leido = doc.getBoolean("leidoPorCliente") ?: true
+                    val ultimoEmisor = doc.getString("ultimoEmisorId") ?: ""
+
+                    if (!leido && ultimoEmisor.isNotBlank() && ultimoEmisor != uid) {
+                        haySinLeer = true
+                        val prestadorNombre = doc.getString("prestadorNombre") ?: "Un prestador"
+                        val texto = doc.getString("ultimoMensaje") ?: "Te ha enviado un mensaje"
+
+                        mostrarNotificacionInApp(
+                            titulo = "Nuevo mensaje de $prestadorNombre",
+                            mensaje = texto,
+                            tipo = TipoNotificacion.NUEVO_MENSAJE
+                        )
+                        break
+                    }
+                }
+                tieneMensajesSinLeer = haySinLeer
+            }
+
+        // 2. Escuchar Nuevas Postulaciones a Solicitudes
+        listenerSolicitudesNotificaciones?.remove()
+        listenerSolicitudesNotificaciones = db.collection("solicitudes")
+            .whereEqualTo("clienteId", uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+
+                for (doc in snapshot.documents) {
+                    val solicitudId = doc.id
+                    val numPropuestas = doc.getLong("cantidadPropuestas")?.toInt()
+                        ?: doc.getLong("numeroInteresados")?.toInt()
+                        ?: 0
+
+                    val conteoAnterior = registroConteoPropuestas[solicitudId]
+
+                    if (!esPrimeraCargaSolicitudes && conteoAnterior != null && numPropuestas > conteoAnterior) {
+                        val tituloSolicitud = doc.getString("detalleProblema")
+                            ?: doc.getString("categoria")
+                            ?: "tu solicitud"
+
+                        tieneNuevasPropuestas = true
+                        mostrarNotificacionInApp(
+                            titulo = "¡Nueva postulación recibida!",
+                            mensaje = "Un profesional se ha postulado a: $tituloSolicitud",
+                            tipo = TipoNotificacion.NUEVA_PROPUESTA
+                        )
+                    }
+
+                    registroConteoPropuestas[solicitudId] = numPropuestas
+                }
+                esPrimeraCargaSolicitudes = false
+            }
+    }
+
+    private fun mostrarNotificacionInApp(titulo: String, mensaje: String, tipo: TipoNotificacion) {
+        notificacionActiva = NotificacionInApp(
+            titulo = titulo,
+            mensaje = mensaje,
+            tipo = tipo
+        )
+    }
+
+    fun descartarNotificacion() {
+        notificacionActiva = null
+    }
+
+    fun limpiarBadgeMensajes() {
+        tieneMensajesSinLeer = false
+    }
+
+    fun limpiarBadgePropuestas() {
+        tieneNuevasPropuestas = false
     }
 
     fun escucharResenas() {
@@ -173,12 +288,7 @@ class ClientViewModel : ViewModel() {
         resenasOtorgadasListener = db.collection("resenas")
             .whereEqualTo("autorId", uid)
             .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    estaCargandoResenas = false
-                    return@addSnapshotListener
-                }
-
-                if (snapshot == null || snapshot.documents.isEmpty()) {
+                if (error != null || snapshot == null || snapshot.documents.isEmpty()) {
                     listaResenasOtorgadas = emptyList()
                     estaCargandoResenas = false
                     return@addSnapshotListener
@@ -395,10 +505,6 @@ class ClientViewModel : ViewModel() {
             }
     }
 
-    /**
-     * Carga únicamente prestadores con cuentas activas, estado APROBADO
-     * y que YA hayan completado su configuración inicial (cobertura + descripción)
-     */
     fun cargarPrestadores() {
         estaCargandoPrestadores = true
         prestadoresListener?.remove()
@@ -422,14 +528,12 @@ class ClientViewModel : ViewModel() {
                         val esPrestador = rol.equals("PRESTADOR", ignoreCase = true) ||
                                 categoriasList.isNotEmpty()
 
-                        // 1. Estado de Verificación del Administrador
                         val estadoVerificacion = doc.getString("estadoVerificacion")
                             ?: doc.getString("estado_verificacion")
                             ?: ""
                         val estaAprobado = estadoVerificacion.equals("APROBADO", ignoreCase = true) ||
                                 estadoVerificacion.equals("VERIFICADO", ignoreCase = true)
 
-                        // 2. Estado de Cuenta (Filtra inhabilitados o eliminados)
                         val activo = doc.getBoolean("activo") ?: true
                         val estadoCuenta = doc.getString("estadoCuenta") ?: doc.getString("estado") ?: ""
                         val estaDeshabilitado = !activo ||
@@ -442,7 +546,6 @@ class ClientViewModel : ViewModel() {
                                 estadoVerificacion.equals("DESACTIVADO", ignoreCase = true) ||
                                 estadoVerificacion.equals("ELIMINADO", ignoreCase = true)
 
-                        // 3. Verificación de Configuración Inicial (Onboarding Completado)
                         @Suppress("UNCHECKED_CAST")
                         val localidades = (doc.get("localidades") as? List<String>)
                             ?: (doc.get("localidadesAtencion") as? List<String>)
@@ -455,7 +558,6 @@ class ClientViewModel : ViewModel() {
                             ?: (doc.get("portafolio") as? List<String>)
                             ?: emptyList()
 
-                        // Un prestador solo es visible si definió sus zonas de cobertura y su descripción profesional
                         val haCompletadoPerfilInicial = localidades.isNotEmpty() && descripcion.isNotBlank()
 
                         if (!esPrestador || !estaAprobado || estaDeshabilitado || !haCompletadoPerfilInicial) {
