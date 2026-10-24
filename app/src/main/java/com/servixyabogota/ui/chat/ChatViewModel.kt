@@ -312,19 +312,20 @@ class ChatViewModel : ViewModel() {
                         isLoading = false
                     )
 
-                    // 🟢 SIEMPRE limpia el contador del documento raíz en Firestore al estar viendo el chat
-                    marcarMensajesComoLeidos(mensajesSinLeerList)
+                    // 🟢 SOLO marca como leídos si realmente existen mensajes entrantes del interlocutor sin leer
+                    if (mensajesSinLeerList.isNotEmpty()) {
+                        marcarMensajesComoLeidos(mensajesSinLeerList)
+                    }
                 }
             }
     }
 
     private fun marcarMensajesComoLeidos(idsMensajes: List<String>) {
-        if (chatIdActual.isBlank()) return
+        if (chatIdActual.isBlank() || idsMensajes.isEmpty()) return
 
         val coleccionPadre = if (esChatDirecto) "chats" else "solicitudes"
         val batch = db.batch()
 
-        // 1. Marca los mensajes individuales como leídos en la subcolección
         idsMensajes.forEach { msgId ->
             val refMsg = db.collection(coleccionPadre)
                 .document(chatIdActual)
@@ -333,7 +334,6 @@ class ChatViewModel : ViewModel() {
             batch.update(refMsg, "leido", true)
         }
 
-        // 2. Reinicia SIEMPRE el contador noLeidos a 0 en el documento raíz
         val esCliente = _uiState.value.esCliente
         val campoNoLeidos = if (esCliente) "noLeidosCliente" else "noLeidosPrestador"
         val campoLeido = if (esCliente) "leidoPorCliente" else "leidoPorPrestador"
@@ -350,6 +350,7 @@ class ChatViewModel : ViewModel() {
 
         batch.commit()
     }
+
     fun enviarMensaje(
         texto: String,
         mediaUrl: String? = null,
@@ -393,7 +394,7 @@ class ChatViewModel : ViewModel() {
                     "fechaUltimoMensaje" to FieldValue.serverTimestamp(),
                     "ultimoEmisorId" to currentUserIdActual,
                     campoNoLeidosDestinatario to FieldValue.increment(1),
-                    campoLeidoDestinatario to false, // 🟢 Activa la alerta in-app para la otra parte
+                    campoLeidoDestinatario to false,
                     campoLeidoEmisor to true
                 )
 
@@ -488,7 +489,7 @@ class ChatViewModel : ViewModel() {
             "propuestaMonto" to monto,
             "estadoPropuesta" to "PENDIENTE",
             campoNoLeidosDestinatario to FieldValue.increment(1),
-            campoLeidoDestinatario to false, // 🟢 Activa la alerta in-app para la otra parte
+            campoLeidoDestinatario to false,
             campoLeidoEmisor to true
         )
 

@@ -194,7 +194,7 @@ class ClientViewModel : ViewModel() {
     fun iniciarEscuchadoresNotificacionesCliente() {
         val uid = auth.currentUser?.uid ?: return
 
-        // 1. ESCUCHAR CHATS DIRECTOS (Colección 'chats')
+        // 1. ESCUCHAR CHATS DIRECTOS
         listenerChatsNotificaciones?.remove()
         listenerChatsNotificaciones = db.collection("chats")
             .whereEqualTo("clienteId", uid)
@@ -210,7 +210,6 @@ class ClientViewModel : ViewModel() {
                     val ultimoMensaje = doc.getString("ultimoMensaje") ?: ""
                     val fechaUltimo = doc.getTimestamp("fechaUltimoMensaje")?.seconds?.toString() ?: ""
 
-                    // 🟢 Suma exactamente el número de mensajes sin leer
                     if (noLeidos > 0 && ultimoEmisorId.isNotBlank() && ultimoEmisorId != uid) {
                         acumuladoDirectos += noLeidos
 
@@ -237,7 +236,7 @@ class ClientViewModel : ViewModel() {
                 actualizarConteoGlobalMensajes()
             }
 
-        // 2. ESCUCHAR SOLICITUDES ACTIVAS (Colección 'solicitudes')
+        // 2. ESCUCHAR SOLICITUDES ACTIVAS
         listenerSolicitudesNotificaciones?.remove()
         listenerSolicitudesNotificaciones = db.collection("solicitudes")
             .whereEqualTo("clienteId", uid)
@@ -276,7 +275,6 @@ class ClientViewModel : ViewModel() {
                     val ultimoMensaje = doc.getString("ultimoMensaje") ?: ""
                     val fechaUltimo = doc.getTimestamp("fechaUltimoMensaje")?.seconds?.toString() ?: ""
 
-                    // 🟢 Suma exactamente la cantidad real de mensajes sin leer recibidos de la contraparte
                     if (noLeidos > 0 && ultimoEmisorId.isNotBlank() && ultimoEmisorId != uid) {
                         acumuladoSolicitudes += noLeidos
 
