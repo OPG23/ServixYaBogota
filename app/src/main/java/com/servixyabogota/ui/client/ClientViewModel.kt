@@ -181,25 +181,28 @@ class ClientViewModel : ViewModel() {
         esPrimeraCargaSolicitudes = true
     }
 
-    // 🟢 ESCUCHADORES EN TIEMPO REAL DE MENSAJES Y PROPUESTAS
+    // 🟢 ESCUCHADORES EN TIEMPO REAL (CHATS DIRECTOS + MENSAJES DE SOLICITUDES + PROPUESTAS)
     fun iniciarEscuchadoresNotificacionesCliente() {
         val uid = auth.currentUser?.uid ?: return
 
-        // 1. Escuchar Nuevos Mensajes
+        // 1. ESCUCHAR CHATS DIRECTOS (Colección 'chats')
         listenerChatsNotificaciones?.remove()
         listenerChatsNotificaciones = db.collection("chats")
             .whereEqualTo("clienteId", uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null) return@addSnapshotListener
 
-                var haySinLeer = false
+                var haySinLeerDirectos = false
                 for (doc in snapshot.documents) {
-                    val leido = doc.getBoolean("leidoPorCliente") ?: true
-                    val ultimoEmisor = doc.getString("ultimoEmisorId") ?: ""
+                    val noLeidos = doc.getLong("noLeidosCliente")?.toInt() ?: 0
+                    val leido = doc.getBoolean("leidoPorCliente") ?: (noLeidos == 0)
+                    val ultimoEmisorId = doc.getString("ultimoEmisorId") ?: ""
 
-                    if (!leido && ultimoEmisor.isNotBlank() && ultimoEmisor != uid) {
-                        haySinLeer = true
-                        val prestadorNombre = doc.getString("prestadorNombre") ?: "Un prestador"
+                    if ((!leido || noLeidos > 0) && ultimoEmisorId.isNotBlank() && ultimoEmisorId != uid) {
+                        haySinLeerDirectos = true
+                        val prestadorNombre = doc.getString("prestadorNombre")
+                            ?: doc.getString("nombrePrestador")
+                            ?: "Un prestador"
                         val texto = doc.getString("ultimoMensaje") ?: "Te ha enviado un mensaje"
 
                         mostrarNotificacionInApp(
@@ -210,18 +213,25 @@ class ClientViewModel : ViewModel() {
                         break
                     }
                 }
-                tieneMensajesSinLeer = haySinLeer
+
+                if (haySinLeerDirectos) {
+                    tieneMensajesSinLeer = true
+                }
             }
 
-        // 2. Escuchar Nuevas Postulaciones a Solicitudes
+        // 2. ESCUCHAR SOLICITUDES / TRABAJOS (Colección 'solicitudes')
         listenerSolicitudesNotificaciones?.remove()
         listenerSolicitudesNotificaciones = db.collection("solicitudes")
             .whereEqualTo("clienteId", uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null) return@addSnapshotListener
 
+                var haySinLeerSolicitudes = false
+
                 for (doc in snapshot.documents) {
                     val solicitudId = doc.id
+
+                    // A) POSTULACIONES Y PROPUESTAS
                     val numPropuestas = doc.getLong("cantidadPropuestas")?.toInt()
                         ?: doc.getLong("numeroInteresados")?.toInt()
                         ?: 0
@@ -240,9 +250,27 @@ class ClientViewModel : ViewModel() {
                             tipo = TipoNotificacion.NUEVA_PROPUESTA
                         )
                     }
-
                     registroConteoPropuestas[solicitudId] = numPropuestas
+
+                    // B) MENSAJES EN SOLICITUDES / TRABAJOS ACEPTADOS
+                    val noLeidos = doc.getLong("noLeidosCliente")?.toInt() ?: 0
+                    val leido = doc.getBoolean("leidoPorCliente") ?: (noLeidos == 0)
+                    val ultimoEmisorId = doc.getString("ultimoEmisorId") ?: ""
+
+                    if ((!leido || noLeidos > 0) && ultimoEmisorId.isNotBlank() && ultimoEmisorId != uid) {
+                        haySinLeerSolicitudes = true
+                        val prestadorNombre = doc.getString("prestadorNombre") ?: "Tu prestador"
+                        val textoMensaje = doc.getString("ultimoMensaje") ?: "Te envió un mensaje"
+
+                        mostrarNotificacionInApp(
+                            titulo = "Mensaje de $prestadorNombre",
+                            mensaje = textoMensaje,
+                            tipo = TipoNotificacion.NUEVO_MENSAJE
+                        )
+                    }
                 }
+
+                tieneMensajesSinLeer = tieneMensajesSinLeer || haySinLeerSolicitudes
                 esPrimeraCargaSolicitudes = false
             }
     }

@@ -17,8 +17,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.util.Date
 import kotlinx.coroutines.tasks.await
+import java.util.Date
 
 data class MensajeChat(
     val id: String = "",
@@ -119,7 +119,6 @@ class ChatViewModel : ViewModel() {
                         ?: ""
 
                     val idContraparteCalculado = if (esCliente) prestadorId else clienteId
-                    // PROTECCIÓN: Si el documento raíz no tiene idContraparte, conservamos el ya detectado por mensajes
                     val idContraparteFinal = idContraparteCalculado.ifBlank { _uiState.value.idContraparte }
                     val rolContraparte = if (esCliente) "Prestador" else "Cliente"
 
@@ -313,9 +312,8 @@ class ChatViewModel : ViewModel() {
                         isLoading = false
                     )
 
-                    if (mensajesSinLeerList.isNotEmpty()) {
-                        marcarMensajesComoLeidos(mensajesSinLeerList)
-                    }
+                    // 🟢 Marca mensajes individuales como leídos y limpia los flags del documento padre
+                    marcarMensajesComoLeidos(mensajesSinLeerList)
                 }
             }
     }
@@ -334,9 +332,19 @@ class ChatViewModel : ViewModel() {
             batch.update(refMsg, "leido", true)
         }
 
-        val campoNoLeidos = if (_uiState.value.esCliente) "noLeidosCliente" else "noLeidosPrestador"
+        val esCliente = _uiState.value.esCliente
+        val campoNoLeidos = if (esCliente) "noLeidosCliente" else "noLeidosPrestador"
+        val campoLeido = if (esCliente) "leidoPorCliente" else "leidoPorPrestador"
+
         val refChat = db.collection(coleccionPadre).document(chatIdActual)
-        batch.set(refChat, mapOf(campoNoLeidos to 0), SetOptions.merge())
+        batch.set(
+            refChat,
+            mapOf(
+                campoNoLeidos to 0,
+                campoLeido to true
+            ),
+            SetOptions.merge()
+        )
 
         batch.commit()
     }
@@ -369,7 +377,10 @@ class ChatViewModel : ViewModel() {
             else -> "📷 Imagen"
         }
 
-        val campoNoLeidosDestinatario = if (_uiState.value.esCliente) "noLeidosPrestador" else "noLeidosCliente"
+        val esCliente = _uiState.value.esCliente
+        val campoNoLeidosDestinatario = if (esCliente) "noLeidosPrestador" else "noLeidosCliente"
+        val campoLeidoDestinatario = if (esCliente) "leidoPorPrestador" else "leidoPorCliente"
+        val campoLeidoEmisor = if (esCliente) "leidoPorCliente" else "leidoPorPrestador"
 
         db.collection(coleccionPadre)
             .document(chatIdActual)
@@ -380,7 +391,9 @@ class ChatViewModel : ViewModel() {
                     "ultimoMensaje" to textoResumen,
                     "fechaUltimoMensaje" to FieldValue.serverTimestamp(),
                     "ultimoEmisorId" to currentUserIdActual,
-                    campoNoLeidosDestinatario to FieldValue.increment(1)
+                    campoNoLeidosDestinatario to FieldValue.increment(1),
+                    campoLeidoDestinatario to false, // 🟢 Activa la alerta in-app para la otra parte
+                    campoLeidoEmisor to true
                 )
 
                 db.collection(coleccionPadre)
@@ -462,7 +475,10 @@ class ChatViewModel : ViewModel() {
         val batch = db.batch()
         batch.set(refMensaje, mensajeOferta)
 
-        val campoNoLeidosDestinatario = if (_uiState.value.esCliente) "noLeidosPrestador" else "noLeidosCliente"
+        val esCliente = _uiState.value.esCliente
+        val campoNoLeidosDestinatario = if (esCliente) "noLeidosPrestador" else "noLeidosCliente"
+        val campoLeidoDestinatario = if (esCliente) "leidoPorPrestador" else "leidoPorCliente"
+        val campoLeidoEmisor = if (esCliente) "leidoPorCliente" else "leidoPorPrestador"
 
         val datosUltimoMensaje = mutableMapOf<String, Any>(
             "ultimoMensaje" to "Oferta de servicio: $$monto",
@@ -470,7 +486,9 @@ class ChatViewModel : ViewModel() {
             "ultimoEmisorId" to currentUserIdActual,
             "propuestaMonto" to monto,
             "estadoPropuesta" to "PENDIENTE",
-            campoNoLeidosDestinatario to FieldValue.increment(1)
+            campoNoLeidosDestinatario to FieldValue.increment(1),
+            campoLeidoDestinatario to false, // 🟢 Activa la alerta in-app para la otra parte
+            campoLeidoEmisor to true
         )
 
         if (esChatDirecto && yaCalificadoOCompletado) {
