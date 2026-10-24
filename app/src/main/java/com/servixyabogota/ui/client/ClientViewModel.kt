@@ -78,10 +78,12 @@ class ClientViewModel : ViewModel() {
     var estaCargandoResenas by mutableStateOf(false)
         private set
 
-    // 🟢 ESTADOS PARA NOTIFICACIONES EN TIEMPO REAL
+    // 🟢 ESTADOS PARA NOTIFICACIONES EN TIEMPO REAL Y BADGES
     var notificacionActiva by mutableStateOf<NotificacionInApp?>(null)
         private set
     var tieneMensajesSinLeer by mutableStateOf(false)
+        private set
+    var cantidadMensajesSinLeer by mutableStateOf(0)
         private set
     var tieneNuevasPropuestas by mutableStateOf(false)
         private set
@@ -94,6 +96,9 @@ class ClientViewModel : ViewModel() {
     private var listenerSolicitudesNotificaciones: ListenerRegistration? = null
 
     private val registroConteoPropuestas = mutableMapOf<String, Int>()
+    private val registroUltimosMensajesNotificados = mutableMapOf<String, String>()
+    private var conteoSinLeerChatsDirectos = 0
+    private var conteoSinLeerSolicitudes = 0
     private var esPrimeraCargaSolicitudes = true
 
     init {
@@ -176,12 +181,16 @@ class ClientViewModel : ViewModel() {
         listaPrestadores = emptyList()
         notificacionActiva = null
         tieneMensajesSinLeer = false
+        cantidadMensajesSinLeer = 0
         tieneNuevasPropuestas = false
+        conteoSinLeerChatsDirectos = 0
+        conteoSinLeerSolicitudes = 0
         registroConteoPropuestas.clear()
+        registroUltimosMensajesNotificados.clear()
         esPrimeraCargaSolicitudes = true
     }
 
-    // 🟢 ESCUCHADORES EN TIEMPO REAL (CHATS DIRECTOS + MENSAJES DE SOLICITUDES + PROPUESTAS)
+    // 🟢 ESCUCHADORES EN TIEMPO REAL (CHATS DIRECTOS + SOLICITUDES + BADGES + SIN REPETICIÓN)
     fun iniciarEscuchadoresNotificacionesCliente() {
         val uid = auth.currentUser?.uid ?: return
 
@@ -192,31 +201,40 @@ class ClientViewModel : ViewModel() {
             .addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null) return@addSnapshotListener
 
-                var haySinLeerDirectos = false
+                var acumuladoDirectos = 0
+
                 for (doc in snapshot.documents) {
+                    val chatId = doc.id
                     val noLeidos = doc.getLong("noLeidosCliente")?.toInt() ?: 0
                     val leido = doc.getBoolean("leidoPorCliente") ?: (noLeidos == 0)
                     val ultimoEmisorId = doc.getString("ultimoEmisorId") ?: ""
+                    val ultimoMensaje = doc.getString("ultimoMensaje") ?: ""
+                    val fechaUltimo = doc.getTimestamp("fechaUltimoMensaje")?.seconds?.toString() ?: ""
 
                     if ((!leido || noLeidos > 0) && ultimoEmisorId.isNotBlank() && ultimoEmisorId != uid) {
-                        haySinLeerDirectos = true
-                        val prestadorNombre = doc.getString("prestadorNombre")
-                            ?: doc.getString("nombrePrestador")
-                            ?: "Un prestador"
-                        val texto = doc.getString("ultimoMensaje") ?: "Te ha enviado un mensaje"
+                        acumuladoDirectos += if (noLeidos > 0) noLeidos else 1
 
-                        mostrarNotificacionInApp(
-                            titulo = "Nuevo mensaje de $prestadorNombre",
-                            mensaje = texto,
-                            tipo = TipoNotificacion.NUEVO_MENSAJE
-                        )
-                        break
+                        val claveMensaje = "$chatId-$fechaUltimo-$ultimoMensaje"
+
+                        if (!esPrimeraCargaSolicitudes && registroUltimosMensajesNotificados[chatId] != claveMensaje) {
+                            registroUltimosMensajesNotificados[chatId] = claveMensaje
+                            val prestadorNombre = doc.getString("prestadorNombre")
+                                ?: doc.getString("nombrePrestador")
+                                ?: "Un prestador"
+
+                            mostrarNotificacionInApp(
+                                titulo = "Nuevo mensaje de $prestadorNombre",
+                                mensaje = ultimoMensaje,
+                                tipo = TipoNotificacion.NUEVO_MENSAJE
+                            )
+                        } else {
+                            registroUltimosMensajesNotificados[chatId] = claveMensaje
+                        }
                     }
                 }
 
-                if (haySinLeerDirectos) {
-                    tieneMensajesSinLeer = true
-                }
+                conteoSinLeerChatsDirectos = acumuladoDirectos
+                actualizarConteoGlobalMensajes()
             }
 
         // 2. ESCUCHAR SOLICITUDES / TRABAJOS (Colección 'solicitudes')
@@ -226,12 +244,12 @@ class ClientViewModel : ViewModel() {
             .addSnapshotListener { snapshot, error ->
                 if (error != null || snapshot == null) return@addSnapshotListener
 
-                var haySinLeerSolicitudes = false
+                var acumuladoSolicitudes = 0
 
                 for (doc in snapshot.documents) {
                     val solicitudId = doc.id
 
-                    // A) POSTULACIONES Y PROPUESTAS
+                    // A) DETECTAR NUEVAS POSTULACIONES
                     val numPropuestas = doc.getLong("cantidadPropuestas")?.toInt()
                         ?: doc.getLong("numeroInteresados")?.toInt()
                         ?: 0
@@ -252,27 +270,43 @@ class ClientViewModel : ViewModel() {
                     }
                     registroConteoPropuestas[solicitudId] = numPropuestas
 
-                    // B) MENSAJES EN SOLICITUDES / TRABAJOS ACEPTADOS
+                    // B) DETECTAR MENSAJES DE TRABAJOS EN CURSO
                     val noLeidos = doc.getLong("noLeidosCliente")?.toInt() ?: 0
                     val leido = doc.getBoolean("leidoPorCliente") ?: (noLeidos == 0)
                     val ultimoEmisorId = doc.getString("ultimoEmisorId") ?: ""
+                    val ultimoMensaje = doc.getString("ultimoMensaje") ?: ""
+                    val fechaUltimo = doc.getTimestamp("fechaUltimoMensaje")?.seconds?.toString() ?: ""
 
                     if ((!leido || noLeidos > 0) && ultimoEmisorId.isNotBlank() && ultimoEmisorId != uid) {
-                        haySinLeerSolicitudes = true
-                        val prestadorNombre = doc.getString("prestadorNombre") ?: "Tu prestador"
-                        val textoMensaje = doc.getString("ultimoMensaje") ?: "Te envió un mensaje"
+                        acumuladoSolicitudes += if (noLeidos > 0) noLeidos else 1
 
-                        mostrarNotificacionInApp(
-                            titulo = "Mensaje de $prestadorNombre",
-                            mensaje = textoMensaje,
-                            tipo = TipoNotificacion.NUEVO_MENSAJE
-                        )
+                        val claveMensaje = "$solicitudId-$fechaUltimo-$ultimoMensaje"
+
+                        if (!esPrimeraCargaSolicitudes && registroUltimosMensajesNotificados[solicitudId] != claveMensaje) {
+                            registroUltimosMensajesNotificados[solicitudId] = claveMensaje
+                            val prestadorNombre = doc.getString("prestadorNombre") ?: "Tu prestador"
+
+                            mostrarNotificacionInApp(
+                                titulo = "Mensaje de $prestadorNombre",
+                                mensaje = ultimoMensaje,
+                                tipo = TipoNotificacion.NUEVO_MENSAJE
+                            )
+                        } else {
+                            registroUltimosMensajesNotificados[solicitudId] = claveMensaje
+                        }
                     }
                 }
 
-                tieneMensajesSinLeer = tieneMensajesSinLeer || haySinLeerSolicitudes
+                conteoSinLeerSolicitudes = acumuladoSolicitudes
+                actualizarConteoGlobalMensajes()
                 esPrimeraCargaSolicitudes = false
             }
+    }
+
+    private fun actualizarConteoGlobalMensajes() {
+        val total = conteoSinLeerChatsDirectos + conteoSinLeerSolicitudes
+        cantidadMensajesSinLeer = total
+        tieneMensajesSinLeer = total > 0
     }
 
     private fun mostrarNotificacionInApp(titulo: String, mensaje: String, tipo: TipoNotificacion) {
@@ -289,6 +323,9 @@ class ClientViewModel : ViewModel() {
 
     fun limpiarBadgeMensajes() {
         tieneMensajesSinLeer = false
+        cantidadMensajesSinLeer = 0
+        conteoSinLeerChatsDirectos = 0
+        conteoSinLeerSolicitudes = 0
     }
 
     fun limpiarBadgePropuestas() {
