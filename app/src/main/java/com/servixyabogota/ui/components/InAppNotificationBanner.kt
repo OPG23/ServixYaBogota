@@ -25,7 +25,7 @@ import kotlinx.coroutines.delay
 fun InAppNotificationBanner(
     notificacion: NotificacionInApp?,
     onDismiss: () -> Unit,
-    onClick: () -> Unit = {}
+    onClick: (NotificacionInApp) -> Unit = {} // 🟢 Recibe el objeto NotificacionInApp al hacer clic
 ) {
     // Autocerrar la alerta después de 4.5 segundos
     LaunchedEffect(notificacion) {
@@ -49,7 +49,7 @@ fun InAppNotificationBanner(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp)
                     .clickable {
-                        onClick()
+                        onClick(notificacion) // 🟢 Pasa la notificación al callback
                         onDismiss()
                     }
             ) {

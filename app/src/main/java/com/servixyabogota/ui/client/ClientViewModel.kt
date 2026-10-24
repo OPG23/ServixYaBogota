@@ -25,11 +25,14 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
+// 🟢 MODELO ACTUALIZADO CON INFORMACIÓN DE NAVEGACIÓN
 data class NotificacionInApp(
     val id: String = UUID.randomUUID().toString(),
     val titulo: String,
     val mensaje: String,
-    val tipo: TipoNotificacion
+    val tipo: TipoNotificacion,
+    val chatId: String = "",
+    val esChatDirecto: Boolean = false
 )
 
 enum class TipoNotificacion {
@@ -190,11 +193,11 @@ class ClientViewModel : ViewModel() {
         esPrimeraCargaSolicitudes = true
     }
 
-    // 🟢 ESCUCHADORES EN TIEMPO REAL (ACUMULACIÓN REAL DE MENSAJES NO LEÍDOS)
+    // 🟢 ESCUCHADORES EN TIEMPO REAL CON ID DE CHAT / SOLICITUD
     fun iniciarEscuchadoresNotificacionesCliente() {
         val uid = auth.currentUser?.uid ?: return
 
-        // 1. ESCUCHAR CHATS DIRECTOS
+        // 1. ESCUCHAR CHATS DIRECTOS (Colección 'chats')
         listenerChatsNotificaciones?.remove()
         listenerChatsNotificaciones = db.collection("chats")
             .whereEqualTo("clienteId", uid)
@@ -224,7 +227,9 @@ class ClientViewModel : ViewModel() {
                             mostrarNotificacionInApp(
                                 titulo = "Nuevo mensaje de $prestadorNombre",
                                 mensaje = ultimoMensaje,
-                                tipo = TipoNotificacion.NUEVO_MENSAJE
+                                tipo = TipoNotificacion.NUEVO_MENSAJE,
+                                chatId = chatId,
+                                esChatDirecto = true
                             )
                         } else {
                             registroUltimosMensajesNotificados[chatId] = claveMensaje
@@ -236,7 +241,7 @@ class ClientViewModel : ViewModel() {
                 actualizarConteoGlobalMensajes()
             }
 
-        // 2. ESCUCHAR SOLICITUDES ACTIVAS
+        // 2. ESCUCHAR SOLICITUDES ACTIVAS (Colección 'solicitudes')
         listenerSolicitudesNotificaciones?.remove()
         listenerSolicitudesNotificaciones = db.collection("solicitudes")
             .whereEqualTo("clienteId", uid)
@@ -264,7 +269,9 @@ class ClientViewModel : ViewModel() {
                         mostrarNotificacionInApp(
                             titulo = "¡Nueva postulación recibida!",
                             mensaje = "Un profesional se ha postulado a: $tituloSolicitud",
-                            tipo = TipoNotificacion.NUEVA_PROPUESTA
+                            tipo = TipoNotificacion.NUEVA_PROPUESTA,
+                            chatId = solicitudId,
+                            esChatDirecto = false
                         )
                     }
                     registroConteoPropuestas[solicitudId] = numPropuestas
@@ -287,7 +294,9 @@ class ClientViewModel : ViewModel() {
                             mostrarNotificacionInApp(
                                 titulo = "Mensaje de $prestadorNombre",
                                 mensaje = ultimoMensaje,
-                                tipo = TipoNotificacion.NUEVO_MENSAJE
+                                tipo = TipoNotificacion.NUEVO_MENSAJE,
+                                chatId = solicitudId,
+                                esChatDirecto = false
                             )
                         } else {
                             registroUltimosMensajesNotificados[solicitudId] = claveMensaje
@@ -307,11 +316,19 @@ class ClientViewModel : ViewModel() {
         tieneMensajesSinLeer = total > 0
     }
 
-    private fun mostrarNotificacionInApp(titulo: String, mensaje: String, tipo: TipoNotificacion) {
+    private fun mostrarNotificacionInApp(
+        titulo: String,
+        mensaje: String,
+        tipo: TipoNotificacion,
+        chatId: String = "",
+        esChatDirecto: Boolean = false
+    ) {
         notificacionActiva = NotificacionInApp(
             titulo = titulo,
             mensaje = mensaje,
-            tipo = tipo
+            tipo = tipo,
+            chatId = chatId,
+            esChatDirecto = esChatDirecto
         )
     }
 
