@@ -29,6 +29,23 @@ import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
+
+// 🟢 MODELO DE NOTIFICACIONES IN-APP PARA PRESTADOR
+data class NotificacionInApp(
+    val id: String = UUID.randomUUID().toString(),
+    val titulo: String,
+    val mensaje: String,
+    val tipo: TipoNotificacion,
+    val chatId: String = "",
+    val esChatDirecto: Boolean = false
+)
+
+enum class TipoNotificacion {
+    NUEVO_MENSAJE,
+    NUEVA_PROPUESTA,
+    PROPUESTA_ACEPTADA
+}
 
 data class ReviewItem(
     val id: String = "",
@@ -106,13 +123,28 @@ class ProviderViewModel : ViewModel() {
     var estaCargandoMisTrabajos by mutableStateOf(false)
         private set
 
+    // 🟢 ESTADOS DE NOTIFICACIONES Y BADGES EN TIEMPO REAL
+    var notificacionActiva by mutableStateOf<NotificacionInApp?>(null)
+        private set
+    var tieneMensajesSinLeer by mutableStateOf(false)
+        private set
+    var cantidadMensajesSinLeer by mutableStateOf(0)
+        private set
+
     private val solicitudesCache = mutableMapOf<String, DocumentSnapshot>()
     private var misTrabajosGroupListener: ListenerRegistration? = null
     private var resenasUserListener: ListenerRegistration? = null
     private var resenasRecibidasListener: ListenerRegistration? = null
     private var resenasOtorgadasListener: ListenerRegistration? = null
     private var chatsDirectosListener: ListenerRegistration? = null
+    private var listenerChatsNotificaciones: ListenerRegistration? = null
+    private var listenerSolicitudesNotificaciones: ListenerRegistration? = null
     private val solicitudesListenersMap = mutableMapOf<String, ListenerRegistration>()
+
+    private val registroUltimosMensajesNotificados = mutableMapOf<String, String>()
+    private var conteoSinLeerChatsDirectos = 0
+    private var conteoSinLeerSolicitudes = 0
+    private var esPrimeraCargaNotificaciones = true
 
     init {
         cargarPerfil()
@@ -125,6 +157,8 @@ class ProviderViewModel : ViewModel() {
         resenasRecibidasListener?.remove()
         resenasOtorgadasListener?.remove()
         chatsDirectosListener?.remove()
+        listenerChatsNotificaciones?.remove()
+        listenerSolicitudesNotificaciones?.remove()
         solicitudesListenersMap.values.forEach { it.remove() }
         solicitudesListenersMap.clear()
         solicitudesCache.clear()
@@ -141,10 +175,18 @@ class ProviderViewModel : ViewModel() {
         listaMisTrabajosActivos = emptyList()
         listaHistorialTrabajos = emptyList()
         listaChatsDirectos = emptyList()
+        notificacionActiva = null
+        tieneMensajesSinLeer = false
+        cantidadMensajesSinLeer = 0
+        conteoSinLeerChatsDirectos = 0
+        conteoSinLeerSolicitudes = 0
+        registroUltimosMensajesNotificados.clear()
+        esPrimeraCargaNotificaciones = true
 
         escucharChatsDirectos()
         escucharResenas()
         escucharMisTrabajos()
+        iniciarEscuchadoresNotificacionesPrestador()
 
         viewModelScope.launch {
             try {
@@ -155,7 +197,6 @@ class ProviderViewModel : ViewModel() {
                         val profesionGuardada = it.profesion.replace(Regex("[^a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]"), "").trim()
                         val rawCategorias = (snapshot.get("categorias") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
 
-                        // 🟢 Conservar categoría inicial si el array de categorías está vacío
                         val categoriasFinales = if (rawCategorias.isEmpty() && profesionGuardada.isNotBlank()) {
                             listOf(profesionGuardada)
                         } else {
@@ -185,6 +226,133 @@ class ProviderViewModel : ViewModel() {
         }
     }
 
+    // 🟢 ESCUCHADORES EN TIEMPO REAL PARA EL PRESTADOR
+    fun iniciarEscuchadoresNotificacionesPrestador() {
+        val uid = auth.currentUser?.uid ?: return
+
+        // 1. ESCUCHAR CHATS DIRECTOS DE PRESTADOR
+        listenerChatsNotificaciones?.remove()
+        listenerChatsNotificaciones = db.collection("chats")
+            .whereEqualTo("prestadorId", uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+
+                var acumuladoDirectos = 0
+
+                for (doc in snapshot.documents) {
+                    val chatId = doc.id
+                    val noLeidos = doc.getLong("noLeidosPrestador")?.toInt() ?: 0
+                    val ultimoEmisorId = doc.getString("ultimoEmisorId") ?: ""
+                    val ultimoMensaje = doc.getString("ultimoMensaje") ?: ""
+                    val fechaUltimo = doc.getTimestamp("fechaUltimoMensaje")?.seconds?.toString() ?: ""
+
+                    if (noLeidos > 0 && ultimoEmisorId.isNotBlank() && ultimoEmisorId != uid) {
+                        acumuladoDirectos += noLeidos
+
+                        val claveMensaje = "$chatId-$fechaUltimo-$ultimoMensaje"
+
+                        if (!esPrimeraCargaNotificaciones && registroUltimosMensajesNotificados[chatId] != claveMensaje) {
+                            registroUltimosMensajesNotificados[chatId] = claveMensaje
+                            val clienteNombre = doc.getString("clienteNombre")
+                                ?: doc.getString("nombreCliente")
+                                ?: "Un cliente"
+
+                            mostrarNotificacionInApp(
+                                titulo = "Nuevo mensaje de $clienteNombre",
+                                mensaje = ultimoMensaje,
+                                tipo = TipoNotificacion.NUEVO_MENSAJE,
+                                chatId = chatId,
+                                esChatDirecto = true
+                            )
+                        } else {
+                            registroUltimosMensajesNotificados[chatId] = claveMensaje
+                        }
+                    }
+                }
+
+                conteoSinLeerChatsDirectos = acumuladoDirectos
+                actualizarConteoGlobalMensajes()
+            }
+
+        // 2. ESCUCHAR CHATS DE SOLICITUDES ASIGNADAS AL PRESTADOR
+        listenerSolicitudesNotificaciones?.remove()
+        listenerSolicitudesNotificaciones = db.collection("solicitudes")
+            .whereEqualTo("prestadorId", uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+
+                var acumuladoSolicitudes = 0
+
+                for (doc in snapshot.documents) {
+                    val solicitudId = doc.id
+                    val noLeidos = doc.getLong("noLeidosPrestador")?.toInt() ?: 0
+                    val ultimoEmisorId = doc.getString("ultimoEmisorId") ?: ""
+                    val ultimoMensaje = doc.getString("ultimoMensaje") ?: ""
+                    val fechaUltimo = doc.getTimestamp("fechaUltimoMensaje")?.seconds?.toString() ?: ""
+
+                    if (noLeidos > 0 && ultimoEmisorId.isNotBlank() && ultimoEmisorId != uid) {
+                        acumuladoSolicitudes += noLeidos
+
+                        val claveMensaje = "$solicitudId-$fechaUltimo-$ultimoMensaje"
+
+                        if (!esPrimeraCargaNotificaciones && registroUltimosMensajesNotificados[solicitudId] != claveMensaje) {
+                            registroUltimosMensajesNotificados[solicitudId] = claveMensaje
+                            val clienteNombre = doc.getString("clienteNombre")
+                                ?: doc.getString("nombreCliente")
+                                ?: "Un cliente"
+
+                            mostrarNotificacionInApp(
+                                titulo = "Mensaje de $clienteNombre",
+                                mensaje = ultimoMensaje,
+                                tipo = TipoNotificacion.NUEVO_MENSAJE,
+                                chatId = solicitudId,
+                                esChatDirecto = false
+                            )
+                        } else {
+                            registroUltimosMensajesNotificados[solicitudId] = claveMensaje
+                        }
+                    }
+                }
+
+                conteoSinLeerSolicitudes = acumuladoSolicitudes
+                actualizarConteoGlobalMensajes()
+                esPrimeraCargaNotificaciones = false
+            }
+    }
+
+    private fun actualizarConteoGlobalMensajes() {
+        val total = conteoSinLeerChatsDirectos + conteoSinLeerSolicitudes
+        cantidadMensajesSinLeer = total
+        tieneMensajesSinLeer = total > 0
+    }
+
+    private fun mostrarNotificacionInApp(
+        titulo: String,
+        mensaje: String,
+        tipo: TipoNotificacion,
+        chatId: String = "",
+        esChatDirecto: Boolean = false
+    ) {
+        notificacionActiva = NotificacionInApp(
+            titulo = titulo,
+            mensaje = mensaje,
+            tipo = tipo,
+            chatId = chatId,
+            esChatDirecto = esChatDirecto
+        )
+    }
+
+    fun descartarNotificacion() {
+        notificacionActiva = null
+    }
+
+    fun limpiarBadgeMensajes() {
+        tieneMensajesSinLeer = false
+        cantidadMensajesSinLeer = 0
+        conteoSinLeerChatsDirectos = 0
+        conteoSinLeerSolicitudes = 0
+    }
+
     fun subirDocumentosPrestador(
         profesion: String,
         fotoPerfil: Uri?,
@@ -207,7 +375,7 @@ class ProviderViewModel : ViewModel() {
 
                 val updates = mutableMapOf<String, Any>(
                     "profesion" to profesionLimpia,
-                    "categorias" to listOf(profesionLimpia), // 🟢 Guarda la categoría limpia en el registro
+                    "categorias" to listOf(profesionLimpia),
                     "estadoVerificacion" to "PENDIENTE_VERIFICACION",
                     "documentosRechazados" to emptyList<String>(),
                     "fechaEnvioDocumentos" to System.currentTimeMillis()
