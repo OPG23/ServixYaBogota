@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.google.firebase.auth.FirebaseAuth
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -44,6 +45,7 @@ fun AdminVerificationScreen(
 
     var prestadorAProcesar by remember { mutableStateOf<SolicitudPrestador?>(null) }
     var mostrarBottomSheetRechazo by remember { mutableStateOf(false) }
+    var mostrarDialogoCerrarSesion by remember { mutableStateOf(false) }
     var tabSeleccionado by remember { mutableStateOf(0) }
 
     // Filtrar para mostrar ÚNICAMENTE los pendientes en el Inicio
@@ -53,6 +55,56 @@ fun AdminVerificationScreen(
 
     val pendientesCount = solicitudesPendientes.size
 
+    // 🟢 DIÁLOGO MODAL DE CONFIRMACIÓN PARA CERRAR SESIÓN
+    if (mostrarDialogoCerrarSesion) {
+        AlertDialog(
+            onDismissRequest = { mostrarDialogoCerrarSesion = false },
+            shape = RoundedCornerShape(16.dp),
+            containerColor = Color.White,
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Logout,
+                    contentDescription = null,
+                    tint = Color(0xFFD32F2F),
+                    modifier = Modifier.size(36.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Cerrar Sesión",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = Color(0xFF111827)
+                )
+            },
+            text = {
+                Text(
+                    text = "¿Estás seguro de que deseas salir del panel de administración?",
+                    fontSize = 14.sp,
+                    color = Color(0xFF4B5563)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        mostrarDialogoCerrarSesion = false
+                        FirebaseAuth.getInstance().signOut()
+                        onLogout()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Cerrar Sesión", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { mostrarDialogoCerrarSesion = false }) {
+                    Text("Cancelar", color = Color.Gray, fontWeight = FontWeight.Medium)
+                }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             Column(
@@ -60,22 +112,26 @@ fun AdminVerificationScreen(
                     .fillMaxWidth()
                     .background(Color.White)
                     .statusBarsPadding()
-                    .padding(horizontal = 20.dp, vertical = 12.dp)
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 🟢 Usamos weight(1f) para evitar que empuje los botones fuera de la pantalla
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = "Panel Administrador",
+                            text = "Panel Admin",
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 22.sp,
-                            color = Color(0xFF111827)
+                            fontSize = 18.sp,
+                            color = Color(0xFF111827),
+                            maxLines = 1
                         )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        // Badge "X Pendientes"
+                        Spacer(modifier = Modifier.width(8.dp))
                         Surface(
                             color = Color(0xFFFF9800),
                             shape = RoundedCornerShape(12.dp)
@@ -83,20 +139,30 @@ fun AdminVerificationScreen(
                             Text(
                                 text = "$pendientesCount Pendientes",
                                 color = Color.White,
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
                     }
 
-                    // Botones de Actualizar y Cerrar Sesión
-                    Row {
+                    // 🟢 Botones de Acción Garantizados en Pantalla
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         IconButton(onClick = { viewModel.cargarSolicitudes() }) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Actualizar", tint = Color(0xFF1976D2))
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Actualizar",
+                                tint = Color(0xFF1976D2)
+                            )
                         }
-                        IconButton(onClick = onLogout) {
-                            Icon(Icons.Default.Logout, contentDescription = "Cerrar Sesión", tint = Color(0xFFD32F2F))
+                        IconButton(onClick = { mostrarDialogoCerrarSesion = true }) {
+                            Icon(
+                                imageVector = Icons.Default.Logout,
+                                contentDescription = "Cerrar Sesión",
+                                tint = Color(0xFFD32F2F)
+                            )
                         }
                     }
                 }
@@ -223,7 +289,7 @@ fun AdminVerificationScreen(
             }
         )
     }
-} // <-- AQUÍ SE CERRÓ LA FUNCIÓN PRINCIPAL
+}
 
 @Composable
 private fun TarjetaPrestadorMockup(
