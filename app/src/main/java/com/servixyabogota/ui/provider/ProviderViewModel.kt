@@ -11,8 +11,10 @@ import androidx.lifecycle.viewModelScope
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.EmailAuthProvider
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.storage.FirebaseStorage
 import com.servixyabogota.data.model.Propuesta
@@ -27,18 +29,34 @@ import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
-// Modelo UI para las reseñas reales
+// 🟢 MODELO DE NOTIFICACIONES IN-APP PARA PRESTADOR
+data class NotificacionInApp(
+    val id: String = UUID.randomUUID().toString(),
+    val titulo: String,
+    val mensaje: String,
+    val tipo: TipoNotificacion,
+    val chatId: String = "",
+    val esChatDirecto: Boolean = false
+)
+
+enum class TipoNotificacion {
+    NUEVO_MENSAJE,
+    NUEVA_PROPUESTA,
+    PROPUESTA_ACEPTADA
+}
+
 data class ReviewItem(
     val id: String = "",
     val nombre: String = "Cliente",
+    val fotoUrl: String = "",
     val fecha: String = "",
     val calificacion: Int = 5,
     val comentario: String = "",
     val fechaObj: Date? = null
 )
 
-// Modelo UI para los chats directos recibidos por el prestador
 data class ProviderDirectChatUi(
     val id: String = "",
     val clienteId: String = "",
@@ -79,381 +97,115 @@ class ProviderViewModel : ViewModel() {
 
     private val repository: SolicitudRepository = SolicitudRepository()
 
-    // ESTADO PARA CHATS DIRECTOS REALES
+    val prestadorId: String
+        get() = auth.currentUser?.uid ?: ""
+
     var listaChatsDirectos by mutableStateOf<List<ProviderDirectChatUi>>(emptyList())
         private set
     var estaCargandoChats by mutableStateOf(false)
         private set
 
-    // ESTADO PARA RESEÑAS REALES DE FIRESTORE
     var listaResenasRecibidas by mutableStateOf<List<ReviewItem>>(emptyList())
         private set
     var listaResenasOtorgadas by mutableStateOf<List<ReviewItem>>(emptyList())
         private set
-    var promedioCalificacion by mutableStateOf(5.0)
+    var promedioCalificacion by mutableStateOf(0.0)
         private set
     var totalResenasCount by mutableStateOf(0)
         private set
     var estaCargandoResenas by mutableStateOf(false)
         private set
 
+    var listaMisTrabajosActivos by mutableStateOf<List<TrabajoItemUI>>(emptyList())
+        private set
+    var listaHistorialTrabajos by mutableStateOf<List<TrabajoItemUI>>(emptyList())
+        private set
+    var estaCargandoMisTrabajos by mutableStateOf(false)
+        private set
+
+    // 🟢 ESTADOS DE NOTIFICACIONES Y BADGES EN TIEMPO REAL
+    var notificacionActiva by mutableStateOf<NotificacionInApp?>(null)
+        private set
+    var tieneMensajesSinLeer by mutableStateOf(false)
+        private set
+    var cantidadMensajesSinLeer by mutableStateOf(0)
+        private set
+
+    private val solicitudesCache = mutableMapOf<String, DocumentSnapshot>()
+    private var misTrabajosGroupListener: ListenerRegistration? = null
+    private var resenasUserListener: ListenerRegistration? = null
+    private var resenasRecibidasListener: ListenerRegistration? = null
+    private var resenasOtorgadasListener: ListenerRegistration? = null
+    private var chatsDirectosListener: ListenerRegistration? = null
+    private var listenerChatsNotificaciones: ListenerRegistration? = null
+    private var listenerSolicitudesNotificaciones: ListenerRegistration? = null
+    private val solicitudesListenersMap = mutableMapOf<String, ListenerRegistration>()
+
+    private val registroUltimosMensajesNotificados = mutableMapOf<String, String>()
+    private var conteoSinLeerChatsDirectos = 0
+    private var conteoSinLeerSolicitudes = 0
+    private var esPrimeraCargaNotificaciones = true
+
     init {
         cargarPerfil()
-        escucharChatsDirectos()
-        escucharResenas()
     }
 
-    /**
-     * Escucha en tiempo real la reputación y las reseñas recibidas/otorgadas del prestador
-     */
-    fun escucharResenas() {
-        val uid = auth.currentUser?.uid ?: return
-        estaCargandoResenas = true
-
-        // 1. Escuchar promedio de estrellas y total de reseñas desde el perfil del usuario
-        db.collection("usuarios").document(uid)
-            .addSnapshotListener { snapshot, _ ->
-                if (snapshot != null && snapshot.exists()) {
-                    promedioCalificacion = snapshot.getDouble("calificacion") ?: 5.0
-                    totalResenasCount = snapshot.getLong("totalResenas")?.toInt() ?: 0
-                }
-            }
-
-        // 2. Escuchar reseñas recibidas de clientes (tipo != PRESTADOR_A_CLIENTE)
-        db.collection("resenas")
-            .whereEqualTo("prestadorId", uid)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    estaCargandoResenas = false
-                    return@addSnapshotListener
-                }
-
-                if (snapshot == null || snapshot.documents.isEmpty()) {
-                    listaResenasRecibidas = emptyList()
-                    estaCargandoResenas = false
-                    return@addSnapshotListener
-                }
-
-                val docsFiltered = snapshot.documents.filter { doc ->
-                    doc.getString("tipo") != "PRESTADOR_A_CLIENTE"
-                }
-
-                if (docsFiltered.isEmpty()) {
-                    listaResenasRecibidas = emptyList()
-                    estaCargandoResenas = false
-                    return@addSnapshotListener
-                }
-
-                val resenasTemp = mutableListOf<ReviewItem>()
-                var procesados = 0
-
-                for (doc in docsFiltered) {
-                    val reviewId = doc.id
-                    val clienteId = doc.getString("clienteId") ?: doc.getString("autorId") ?: ""
-                    val calificacion = doc.getLong("calificacion")?.toInt() ?: 5
-                    val comentario = doc.getString("comentario") ?: ""
-                    val timestamp = doc.getTimestamp("fecha")
-                    val fechaObj = timestamp?.toDate()
-
-                    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-                    val fechaFormateada = if (fechaObj != null) sdf.format(fechaObj) else "Reciente"
-                    val nombreDirecto = doc.getString("clienteNombre") ?: doc.getString("autorNombre")
-
-                    if (!nombreDirecto.isNullOrBlank()) {
-                        resenasTemp.add(
-                            ReviewItem(
-                                id = reviewId,
-                                nombre = nombreDirecto,
-                                fecha = fechaFormateada,
-                                calificacion = calificacion,
-                                comentario = comentario,
-                                fechaObj = fechaObj
-                            )
-                        )
-                        procesados++
-                        if (procesados == docsFiltered.size) {
-                            listaResenasRecibidas = resenasTemp.sortedByDescending { it.fechaObj }
-                            estaCargandoResenas = false
-                        }
-                    } else if (clienteId.isNotBlank()) {
-                        db.collection("usuarios").document(clienteId).get()
-                            .addOnSuccessListener { clientDoc ->
-                                val nombreDoc = clientDoc.getString("nombreCompleto")
-                                val primerNombre = clientDoc.getString("nombre") ?: ""
-                                val apellido = clientDoc.getString("apellido") ?: ""
-
-                                val nombreFinal = when {
-                                    !nombreDoc.isNullOrBlank() -> nombreDoc
-                                    primerNombre.isNotBlank() -> "$primerNombre $apellido".trim()
-                                    else -> "Cliente ServixYa"
-                                }
-
-                                resenasTemp.add(
-                                    ReviewItem(
-                                        id = reviewId,
-                                        nombre = nombreFinal,
-                                        fecha = fechaFormateada,
-                                        calificacion = calificacion,
-                                        comentario = comentario,
-                                        fechaObj = fechaObj
-                                    )
-                                )
-                                procesados++
-                                if (procesados == docsFiltered.size) {
-                                    listaResenasRecibidas = resenasTemp.sortedByDescending { it.fechaObj }
-                                    estaCargandoResenas = false
-                                }
-                            }
-                            .addOnFailureListener {
-                                resenasTemp.add(
-                                    ReviewItem(
-                                        id = reviewId,
-                                        nombre = "Cliente ServixYa",
-                                        fecha = fechaFormateada,
-                                        calificacion = calificacion,
-                                        comentario = comentario,
-                                        fechaObj = fechaObj
-                                    )
-                                )
-                                procesados++
-                                if (procesados == docsFiltered.size) {
-                                    listaResenasRecibidas = resenasTemp.sortedByDescending { it.fechaObj }
-                                    estaCargandoResenas = false
-                                }
-                            }
-                    } else {
-                        resenasTemp.add(
-                            ReviewItem(
-                                id = reviewId,
-                                nombre = "Cliente ServixYa",
-                                fecha = fechaFormateada,
-                                calificacion = calificacion,
-                                comentario = comentario,
-                                fechaObj = fechaObj
-                            )
-                        )
-                        procesados++
-                        if (procesados == docsFiltered.size) {
-                            listaResenasRecibidas = resenasTemp.sortedByDescending { it.fechaObj }
-                            estaCargandoResenas = false
-                        }
-                    }
-                }
-            }
-
-        // 3. Escuchar reseñas otorgadas por el prestador a clientes (autorId == uid)
-        db.collection("resenas")
-            .whereEqualTo("autorId", uid)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null || snapshot == null || snapshot.documents.isEmpty()) {
-                    listaResenasOtorgadas = emptyList()
-                    return@addSnapshotListener
-                }
-
-                val docsFiltered = snapshot.documents.filter { doc ->
-                    doc.getString("tipo") == "PRESTADOR_A_CLIENTE" || doc.getString("destinatarioId") != null
-                }
-
-                if (docsFiltered.isEmpty()) {
-                    listaResenasOtorgadas = emptyList()
-                    return@addSnapshotListener
-                }
-
-                val otorgadasTemp = mutableListOf<ReviewItem>()
-                var procesados = 0
-
-                for (doc in docsFiltered) {
-                    val reviewId = doc.id
-                    val clienteId = doc.getString("destinatarioId") ?: doc.getString("clienteId") ?: doc.getString("receptorId") ?: ""
-                    val calificacion = doc.getLong("calificacion")?.toInt() ?: 5
-                    val comentario = doc.getString("comentario") ?: ""
-                    val timestamp = doc.getTimestamp("fecha")
-                    val fechaObj = timestamp?.toDate()
-
-                    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-                    val fechaFormateada = if (fechaObj != null) sdf.format(fechaObj) else "Reciente"
-                    val clienteNombreDirecto = doc.getString("destinatarioNombre") ?: doc.getString("clienteNombre")
-
-                    if (!clienteNombreDirecto.isNullOrBlank()) {
-                        otorgadasTemp.add(
-                            ReviewItem(
-                                id = reviewId,
-                                nombre = clienteNombreDirecto,
-                                fecha = fechaFormateada,
-                                calificacion = calificacion,
-                                comentario = comentario,
-                                fechaObj = fechaObj
-                            )
-                        )
-                        procesados++
-                        if (procesados == docsFiltered.size) {
-                            listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
-                        }
-                    } else if (clienteId.isNotBlank()) {
-                        db.collection("usuarios").document(clienteId).get()
-                            .addOnSuccessListener { clientDoc ->
-                                val nombreDoc = clientDoc.getString("nombreCompleto")
-                                val primerNombre = clientDoc.getString("nombre") ?: ""
-                                val apellido = clientDoc.getString("apellido") ?: ""
-
-                                val nombreFinal = when {
-                                    !nombreDoc.isNullOrBlank() -> nombreDoc
-                                    primerNombre.isNotBlank() -> "$primerNombre $apellido".trim()
-                                    else -> "Cliente ServixYa"
-                                }
-
-                                otorgadasTemp.add(
-                                    ReviewItem(
-                                        id = reviewId,
-                                        nombre = nombreFinal,
-                                        fecha = fechaFormateada,
-                                        calificacion = calificacion,
-                                        comentario = comentario,
-                                        fechaObj = fechaObj
-                                    )
-                                )
-                                procesados++
-                                if (procesados == docsFiltered.size) {
-                                    listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
-                                }
-                            }
-                            .addOnFailureListener {
-                                otorgadasTemp.add(
-                                    ReviewItem(
-                                        id = reviewId,
-                                        nombre = "Cliente ServixYa",
-                                        fecha = fechaFormateada,
-                                        calificacion = calificacion,
-                                        comentario = comentario,
-                                        fechaObj = fechaObj
-                                    )
-                                )
-                                procesados++
-                                if (procesados == docsFiltered.size) {
-                                    listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
-                                }
-                            }
-                    } else {
-                        otorgadasTemp.add(
-                            ReviewItem(
-                                id = reviewId,
-                                nombre = "Cliente ServixYa",
-                                fecha = fechaFormateada,
-                                calificacion = calificacion,
-                                comentario = comentario,
-                                fechaObj = fechaObj
-                            )
-                        )
-                        procesados++
-                        if (procesados == docsFiltered.size) {
-                            listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
-                        }
-                    }
-                }
-            }
-    }
-
-    /**
-     * Escucha en tiempo real la colección "chats" en Firestore para el Prestador autenticado
-     */
-    fun escucharChatsDirectos() {
-        val uid = auth.currentUser?.uid ?: return
-        estaCargandoChats = true
-
-        db.collection("chats")
-            .whereEqualTo("prestadorId", uid)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    estaCargandoChats = false
-                    return@addSnapshotListener
-                }
-
-                if (snapshot != null) {
-                    val docs = snapshot.documents
-                    if (docs.isEmpty()) {
-                        listaChatsDirectos = emptyList()
-                        estaCargandoChats = false
-                        return@addSnapshotListener
-                    }
-
-                    val chatsTemp = mutableListOf<ProviderDirectChatUi>()
-                    var procesados = 0
-
-                    for (doc in docs) {
-                        val chatId = doc.id
-                        val clienteId = doc.getString("clienteId") ?: ""
-                        val ultimoMensaje = doc.getString("ultimoMensaje") ?: "Conversación iniciada"
-                        val timestamp = doc.getTimestamp("fechaUltimoMensaje")
-                        val fecha = timestamp?.toDate()
-
-                        val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
-                        val horaFormateada = if (fecha != null) sdf.format(fecha) else ""
-
-                        if (clienteId.isNotBlank()) {
-                            db.collection("usuarios").document(clienteId).get()
-                                .addOnSuccessListener { clientDoc ->
-                                    val nombreDoc = clientDoc.getString("nombreCompleto")
-                                    val primerNombre = clientDoc.getString("nombre") ?: ""
-                                    val apellido = clientDoc.getString("apellido") ?: ""
-
-                                    val nombreFinal = when {
-                                        !nombreDoc.isNullOrBlank() -> nombreDoc
-                                        primerNombre.isNotBlank() -> "$primerNombre $apellido".trim()
-                                        else -> "Cliente ServixYa"
-                                    }
-
-                                    val fotoFinal = clientDoc.getString("fotoUrl")
-                                        ?: clientDoc.getString("photoUrl")
-                                        ?: ""
-
-                                    chatsTemp.add(
-                                        ProviderDirectChatUi(
-                                            id = chatId,
-                                            clienteId = clienteId,
-                                            clientName = nombreFinal,
-                                            clientPhoto = fotoFinal,
-                                            lastMessage = ultimoMensaje,
-                                            timeFormatted = horaFormateada,
-                                            fechaUltimoMensaje = fecha
-                                        )
-                                    )
-
-                                    procesados++
-                                    if (procesados == docs.size) {
-                                        listaChatsDirectos = chatsTemp.sortedByDescending { it.fechaUltimoMensaje }
-                                        estaCargandoChats = false
-                                    }
-                                }
-                                .addOnFailureListener {
-                                    procesados++
-                                    if (procesados == docs.size) {
-                                        listaChatsDirectos = chatsTemp.sortedByDescending { it.fechaUltimoMensaje }
-                                        estaCargandoChats = false
-                                    }
-                                }
-                        } else {
-                            procesados++
-                            if (procesados == docs.size) {
-                                listaChatsDirectos = chatsTemp.sortedByDescending { it.fechaUltimoMensaje }
-                                estaCargandoChats = false
-                            }
-                        }
-                    }
-                }
-            }
+    override fun onCleared() {
+        super.onCleared()
+        misTrabajosGroupListener?.remove()
+        resenasUserListener?.remove()
+        resenasRecibidasListener?.remove()
+        resenasOtorgadasListener?.remove()
+        chatsDirectosListener?.remove()
+        listenerChatsNotificaciones?.remove()
+        listenerSolicitudesNotificaciones?.remove()
+        solicitudesListenersMap.values.forEach { it.remove() }
+        solicitudesListenersMap.clear()
+        solicitudesCache.clear()
     }
 
     fun cargarPerfil() {
         val uid = auth.currentUser?.uid ?: return
+
+        _uiState.value = EstadoProveedorUiState()
+        promedioCalificacion = 0.0
+        totalResenasCount = 0
+        listaResenasRecibidas = emptyList()
+        listaResenasOtorgadas = emptyList()
+        listaMisTrabajosActivos = emptyList()
+        listaHistorialTrabajos = emptyList()
+        listaChatsDirectos = emptyList()
+        notificacionActiva = null
+        tieneMensajesSinLeer = false
+        cantidadMensajesSinLeer = 0
+        conteoSinLeerChatsDirectos = 0
+        conteoSinLeerSolicitudes = 0
+        registroUltimosMensajesNotificados.clear()
+        esPrimeraCargaNotificaciones = true
+
+        escucharChatsDirectos()
+        escucharResenas()
+        escucharMisTrabajos()
+        iniciarEscuchadoresNotificacionesPrestador()
+
         viewModelScope.launch {
             try {
                 val snapshot = db.collection("usuarios").document(uid).get().await()
                 if (snapshot.exists()) {
                     val user = snapshot.toObject(User::class.java)
                     user?.let {
+                        val profesionGuardada = it.profesion.replace(Regex("[^a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]"), "").trim()
+                        val rawCategorias = (snapshot.get("categorias") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+
+                        val categoriasFinales = if (rawCategorias.isEmpty() && profesionGuardada.isNotBlank()) {
+                            listOf(profesionGuardada)
+                        } else {
+                            rawCategorias
+                        }
+
                         _uiState.value = EstadoProveedorUiState(
                             nombreCompleto = it.nombreCompleto,
-                            profesion = it.profesion,
+                            profesion = profesionGuardada,
                             fotoUrl = snapshot.getString("fotoUrl") ?: "",
                             telefono = snapshot.getString("telefono") ?: snapshot.getString("celular") ?: "",
                             correo = snapshot.getString("correo") ?: auth.currentUser?.email ?: "",
@@ -462,7 +214,7 @@ class ProviderViewModel : ViewModel() {
                             justificacionRechazo = it.justificacionRechazo,
                             documentosRechazados = it.documentosRechazados,
                             localidades = (snapshot.get("localidades") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
-                            categorias = (snapshot.get("categorias") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                            categorias = categoriasFinales,
                             portafolioUrls = (snapshot.get("portafolioUrls") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
                             descripcion = snapshot.getString("descripcion") ?: ""
                         )
@@ -474,30 +226,131 @@ class ProviderViewModel : ViewModel() {
         }
     }
 
-    fun actualizarContactoPerfil(
-        telefono: String,
-        correo: String,
-        onSuccess: () -> Unit,
-        onError: (String) -> Unit
-    ) {
-        val uid = auth.currentUser?.uid ?: run {
-            onError("Usuario no autenticado.")
-            return
-        }
+    // 🟢 ESCUCHADORES EN TIEMPO REAL PARA EL PRESTADOR
+    fun iniciarEscuchadoresNotificacionesPrestador() {
+        val uid = auth.currentUser?.uid ?: return
 
-        viewModelScope.launch {
-            try {
-                val updates = mapOf(
-                    "telefono" to telefono,
-                    "correo" to correo
-                )
-                db.collection("usuarios").document(uid).set(updates, SetOptions.merge()).await()
-                cargarPerfil()
-                onSuccess()
-            } catch (e: Exception) {
-                onError(e.localizedMessage ?: "Error al actualizar contacto.")
+        // 1. ESCUCHAR CHATS DIRECTOS DE PRESTADOR
+        listenerChatsNotificaciones?.remove()
+        listenerChatsNotificaciones = db.collection("chats")
+            .whereEqualTo("prestadorId", uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+
+                var acumuladoDirectos = 0
+
+                for (doc in snapshot.documents) {
+                    val chatId = doc.id
+                    val noLeidos = doc.getLong("noLeidosPrestador")?.toInt() ?: 0
+                    val ultimoEmisorId = doc.getString("ultimoEmisorId") ?: ""
+                    val ultimoMensaje = doc.getString("ultimoMensaje") ?: ""
+                    val fechaUltimo = doc.getTimestamp("fechaUltimoMensaje")?.seconds?.toString() ?: ""
+
+                    if (noLeidos > 0 && ultimoEmisorId.isNotBlank() && ultimoEmisorId != uid) {
+                        acumuladoDirectos += noLeidos
+
+                        val claveMensaje = "$chatId-$fechaUltimo-$ultimoMensaje"
+
+                        if (!esPrimeraCargaNotificaciones && registroUltimosMensajesNotificados[chatId] != claveMensaje) {
+                            registroUltimosMensajesNotificados[chatId] = claveMensaje
+                            val clienteNombre = doc.getString("clienteNombre")
+                                ?: doc.getString("nombreCliente")
+                                ?: "Un cliente"
+
+                            mostrarNotificacionInApp(
+                                titulo = "Nuevo mensaje de $clienteNombre",
+                                mensaje = ultimoMensaje,
+                                tipo = TipoNotificacion.NUEVO_MENSAJE,
+                                chatId = chatId,
+                                esChatDirecto = true
+                            )
+                        } else {
+                            registroUltimosMensajesNotificados[chatId] = claveMensaje
+                        }
+                    }
+                }
+
+                conteoSinLeerChatsDirectos = acumuladoDirectos
+                actualizarConteoGlobalMensajes()
             }
-        }
+
+        // 2. ESCUCHAR CHATS DE SOLICITUDES ASIGNADAS AL PRESTADOR
+        listenerSolicitudesNotificaciones?.remove()
+        listenerSolicitudesNotificaciones = db.collection("solicitudes")
+            .whereEqualTo("prestadorId", uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+
+                var acumuladoSolicitudes = 0
+
+                for (doc in snapshot.documents) {
+                    val solicitudId = doc.id
+                    val noLeidos = doc.getLong("noLeidosPrestador")?.toInt() ?: 0
+                    val ultimoEmisorId = doc.getString("ultimoEmisorId") ?: ""
+                    val ultimoMensaje = doc.getString("ultimoMensaje") ?: ""
+                    val fechaUltimo = doc.getTimestamp("fechaUltimoMensaje")?.seconds?.toString() ?: ""
+
+                    if (noLeidos > 0 && ultimoEmisorId.isNotBlank() && ultimoEmisorId != uid) {
+                        acumuladoSolicitudes += noLeidos
+
+                        val claveMensaje = "$solicitudId-$fechaUltimo-$ultimoMensaje"
+
+                        if (!esPrimeraCargaNotificaciones && registroUltimosMensajesNotificados[solicitudId] != claveMensaje) {
+                            registroUltimosMensajesNotificados[solicitudId] = claveMensaje
+                            val clienteNombre = doc.getString("clienteNombre")
+                                ?: doc.getString("nombreCliente")
+                                ?: "Un cliente"
+
+                            mostrarNotificacionInApp(
+                                titulo = "Mensaje de $clienteNombre",
+                                mensaje = ultimoMensaje,
+                                tipo = TipoNotificacion.NUEVO_MENSAJE,
+                                chatId = solicitudId,
+                                esChatDirecto = false
+                            )
+                        } else {
+                            registroUltimosMensajesNotificados[solicitudId] = claveMensaje
+                        }
+                    }
+                }
+
+                conteoSinLeerSolicitudes = acumuladoSolicitudes
+                actualizarConteoGlobalMensajes()
+                esPrimeraCargaNotificaciones = false
+            }
+    }
+
+    private fun actualizarConteoGlobalMensajes() {
+        val total = conteoSinLeerChatsDirectos + conteoSinLeerSolicitudes
+        cantidadMensajesSinLeer = total
+        tieneMensajesSinLeer = total > 0
+    }
+
+    private fun mostrarNotificacionInApp(
+        titulo: String,
+        mensaje: String,
+        tipo: TipoNotificacion,
+        chatId: String = "",
+        esChatDirecto: Boolean = false
+    ) {
+        notificacionActiva = NotificacionInApp(
+            titulo = titulo,
+            mensaje = mensaje,
+            tipo = tipo,
+            chatId = chatId,
+            esChatDirecto = esChatDirecto
+        )
+    }
+
+    fun descartarNotificacion() {
+        notificacionActiva = null
+    }
+
+    fun limpiarBadgeMensajes() {
+        tieneMensajesSinLeer = false
+        cantidadMensajesSinLeer = 0
+        conteoSinLeerChatsDirectos = 0
+        conteoSinLeerSolicitudes = 0
     }
 
     fun subirDocumentosPrestador(
@@ -518,8 +371,11 @@ class ProviderViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
+                val profesionLimpia = profesion.replace(Regex("[^a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]"), "").trim()
+
                 val updates = mutableMapOf<String, Any>(
-                    "profesion" to profesion,
+                    "profesion" to profesionLimpia,
+                    "categorias" to listOf(profesionLimpia),
                     "estadoVerificacion" to "PENDIENTE_VERIFICACION",
                     "documentosRechazados" to emptyList<String>(),
                     "fechaEnvioDocumentos" to System.currentTimeMillis()
@@ -631,13 +487,372 @@ class ProviderViewModel : ViewModel() {
         }
     }
 
+    fun escucharResenas() {
+        val uid = auth.currentUser?.uid ?: return
+        estaCargandoResenas = true
+
+        resenasUserListener?.remove()
+        resenasRecibidasListener?.remove()
+        resenasOtorgadasListener?.remove()
+
+        resenasUserListener = db.collection("usuarios").document(uid)
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null && snapshot.exists()) {
+                    promedioCalificacion = snapshot.getDouble("calificacion")
+                        ?: snapshot.getDouble("promedioCalificacion")
+                                ?: 0.0
+                    totalResenasCount = snapshot.getLong("totalResenas")?.toInt() ?: 0
+                }
+            }
+
+        resenasRecibidasListener = db.collection("resenas")
+            .whereEqualTo("prestadorId", uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null || snapshot.documents.isEmpty()) {
+                    listaResenasRecibidas = emptyList()
+                    estaCargandoResenas = false
+                    return@addSnapshotListener
+                }
+
+                val docsFiltered = snapshot.documents.filter { doc ->
+                    doc.getString("tipo") != "PRESTADOR_A_CLIENTE"
+                }
+
+                if (docsFiltered.isEmpty()) {
+                    listaResenasRecibidas = emptyList()
+                    estaCargandoResenas = false
+                    return@addSnapshotListener
+                }
+
+                val resenasTemp = mutableListOf<ReviewItem>()
+                var procesados = 0
+
+                for (doc in docsFiltered) {
+                    val reviewId = doc.id
+                    val clienteId = doc.getString("clienteId") ?: doc.getString("autorId") ?: ""
+                    val calificacion = doc.getLong("calificacion")?.toInt() ?: 5
+                    val comentario = doc.getString("comentario") ?: ""
+                    val timestamp = doc.getTimestamp("fecha")
+                    val fechaObj = timestamp?.toDate()
+
+                    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                    val fechaFormateada = if (fechaObj != null) sdf.format(fechaObj) else "Reciente"
+                    val nombreDirecto = doc.getString("clienteNombre") ?: doc.getString("autorNombre")
+                    val fotoDirecta = doc.getString("clienteFotoUrl")
+                        ?: doc.getString("autorFotoUrl")
+                        ?: doc.getString("fotoUrl")
+                        ?: ""
+
+                    if (clienteId.isNotBlank()) {
+                        db.collection("usuarios").document(clienteId).get()
+                            .addOnSuccessListener { clientDoc ->
+                                val nombreDoc = clientDoc.getString("nombreCompleto")
+                                val primerNombre = clientDoc.getString("nombre") ?: ""
+                                val apellido = clientDoc.getString("apellido") ?: clientDoc.getString("apellidos") ?: ""
+
+                                val nombreFinal = when {
+                                    !nombreDirecto.isNullOrBlank() -> nombreDirecto
+                                    !nombreDoc.isNullOrBlank() -> nombreDoc
+                                    primerNombre.isNotBlank() -> "$primerNombre $apellido".trim()
+                                    else -> "Cliente ServixYa"
+                                }
+
+                                val fotoFinal = fotoDirecta.ifBlank {
+                                    clientDoc.getString("fotoUrl")
+                                        ?: clientDoc.getString("fotoPerfilUrl")
+                                        ?: clientDoc.getString("foto")
+                                        ?: ""
+                                }
+
+                                resenasTemp.add(
+                                    ReviewItem(
+                                        id = reviewId,
+                                        nombre = nombreFinal,
+                                        fotoUrl = fotoFinal,
+                                        fecha = fechaFormateada,
+                                        calificacion = calificacion,
+                                        comentario = comentario,
+                                        fechaObj = fechaObj
+                                    )
+                                )
+                                procesados++
+                                if (procesados == docsFiltered.size) {
+                                    listaResenasRecibidas = resenasTemp.sortedByDescending { it.fechaObj }
+                                    estaCargandoResenas = false
+                                }
+                            }
+                            .addOnFailureListener {
+                                resenasTemp.add(
+                                    ReviewItem(
+                                        id = reviewId,
+                                        nombre = if (!nombreDirecto.isNullOrBlank()) nombreDirecto else "Cliente ServixYa",
+                                        fotoUrl = fotoDirecta,
+                                        fecha = fechaFormateada,
+                                        calificacion = calificacion,
+                                        comentario = comentario,
+                                        fechaObj = fechaObj
+                                    )
+                                )
+                                procesados++
+                                if (procesados == docsFiltered.size) {
+                                    listaResenasRecibidas = resenasTemp.sortedByDescending { it.fechaObj }
+                                    estaCargandoResenas = false
+                                }
+                            }
+                    } else {
+                        resenasTemp.add(
+                            ReviewItem(
+                                id = reviewId,
+                                nombre = if (!nombreDirecto.isNullOrBlank()) nombreDirecto else "Cliente ServixYa",
+                                fotoUrl = fotoDirecta,
+                                fecha = fechaFormateada,
+                                calificacion = calificacion,
+                                comentario = comentario,
+                                fechaObj = fechaObj
+                            )
+                        )
+                        procesados++
+                        if (procesados == docsFiltered.size) {
+                            listaResenasRecibidas = resenasTemp.sortedByDescending { it.fechaObj }
+                            estaCargandoResenas = false
+                        }
+                    }
+                }
+            }
+
+        resenasOtorgadasListener = db.collection("resenas")
+            .whereEqualTo("autorId", uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null || snapshot.documents.isEmpty()) {
+                    listaResenasOtorgadas = emptyList()
+                    return@addSnapshotListener
+                }
+
+                val docsFiltered = snapshot.documents.filter { doc ->
+                    doc.getString("tipo") == "PRESTADOR_A_CLIENTE" || doc.getString("destinatarioId") != null
+                }
+
+                if (docsFiltered.isEmpty()) {
+                    listaResenasOtorgadas = emptyList()
+                    return@addSnapshotListener
+                }
+
+                val otorgadasTemp = mutableListOf<ReviewItem>()
+                var procesados = 0
+
+                for (doc in docsFiltered) {
+                    val reviewId = doc.id
+                    val clienteId = doc.getString("destinatarioId") ?: doc.getString("clienteId") ?: doc.getString("receptorId") ?: ""
+                    val calificacion = doc.getLong("calificacion")?.toInt() ?: 5
+                    val comentario = doc.getString("comentario") ?: ""
+                    val timestamp = doc.getTimestamp("fecha")
+                    val fechaObj = timestamp?.toDate()
+
+                    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                    val fechaFormateada = if (fechaObj != null) sdf.format(fechaObj) else "Reciente"
+                    val clienteNombreDirecto = doc.getString("destinatarioNombre") ?: doc.getString("clienteNombre")
+                    val fotoDirecta = doc.getString("destinatarioFotoUrl")
+                        ?: doc.getString("clienteFotoUrl")
+                        ?: doc.getString("fotoUrl")
+                        ?: ""
+
+                    if (clienteId.isNotBlank()) {
+                        db.collection("usuarios").document(clienteId).get()
+                            .addOnSuccessListener { clientDoc ->
+                                val nombreDoc = clientDoc.getString("nombreCompleto")
+                                val primerNombre = clientDoc.getString("nombre") ?: ""
+                                val apellido = clientDoc.getString("apellido") ?: clientDoc.getString("apellidos") ?: ""
+
+                                val nombreFinal = when {
+                                    !clienteNombreDirecto.isNullOrBlank() -> clienteNombreDirecto
+                                    !nombreDoc.isNullOrBlank() -> nombreDoc
+                                    primerNombre.isNotBlank() -> "$primerNombre $apellido".trim()
+                                    else -> "Cliente ServixYa"
+                                }
+
+                                val fotoFinal = fotoDirecta.ifBlank {
+                                    clientDoc.getString("fotoUrl")
+                                        ?: clientDoc.getString("fotoPerfilUrl")
+                                        ?: clientDoc.getString("foto")
+                                        ?: ""
+                                }
+
+                                otorgadasTemp.add(
+                                    ReviewItem(
+                                        id = reviewId,
+                                        nombre = nombreFinal,
+                                        fotoUrl = fotoFinal,
+                                        fecha = fechaFormateada,
+                                        calificacion = calificacion,
+                                        comentario = comentario,
+                                        fechaObj = fechaObj
+                                    )
+                                )
+                                procesados++
+                                if (procesados == docsFiltered.size) {
+                                    listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
+                                }
+                            }
+                            .addOnFailureListener {
+                                otorgadasTemp.add(
+                                    ReviewItem(
+                                        id = reviewId,
+                                        nombre = if (!clienteNombreDirecto.isNullOrBlank()) clienteNombreDirecto else "Cliente ServixYa",
+                                        fotoUrl = fotoDirecta,
+                                        fecha = fechaFormateada,
+                                        calificacion = calificacion,
+                                        comentario = comentario,
+                                        fechaObj = fechaObj
+                                    )
+                                )
+                                procesados++
+                                if (procesados == docsFiltered.size) {
+                                    listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
+                                }
+                            }
+                    } else {
+                        otorgadasTemp.add(
+                            ReviewItem(
+                                id = reviewId,
+                                nombre = if (!clienteNombreDirecto.isNullOrBlank()) clienteNombreDirecto else "Cliente ServixYa",
+                                fotoUrl = fotoDirecta,
+                                fecha = fechaFormateada,
+                                calificacion = calificacion,
+                                comentario = comentario,
+                                fechaObj = fechaObj
+                            )
+                        )
+                        procesados++
+                        if (procesados == docsFiltered.size) {
+                            listaResenasOtorgadas = otorgadasTemp.sortedByDescending { it.fechaObj }
+                        }
+                    }
+                }
+            }
+    }
+
+    fun escucharChatsDirectos() {
+        val uid = auth.currentUser?.uid ?: return
+        estaCargandoChats = true
+
+        chatsDirectosListener?.remove()
+
+        chatsDirectosListener = db.collection("chats")
+            .whereEqualTo("prestadorId", uid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    estaCargandoChats = false
+                    return@addSnapshotListener
+                }
+
+                if (snapshot != null) {
+                    val docs = snapshot.documents
+                    if (docs.isEmpty()) {
+                        listaChatsDirectos = emptyList()
+                        estaCargandoChats = false
+                        return@addSnapshotListener
+                    }
+
+                    val chatsTemp = mutableListOf<ProviderDirectChatUi>()
+                    var procesados = 0
+
+                    for (doc in docs) {
+                        val chatId = doc.id
+                        val clienteId = doc.getString("clienteId") ?: ""
+                        val ultimoMensaje = doc.getString("ultimoMensaje") ?: "Conversación iniciada"
+                        val timestamp = doc.getTimestamp("fechaUltimoMensaje")
+                        val fecha = timestamp?.toDate()
+
+                        val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
+                        val horaFormateada = if (fecha != null) sdf.format(fecha) else ""
+
+                        if (clienteId.isNotBlank()) {
+                            db.collection("usuarios").document(clienteId).get()
+                                .addOnSuccessListener { clientDoc ->
+                                    val nombreDoc = clientDoc.getString("nombreCompleto")
+                                    val primerNombre = clientDoc.getString("nombre") ?: ""
+                                    val apellido = clientDoc.getString("apellido") ?: ""
+
+                                    val nombreFinal = when {
+                                        !nombreDoc.isNullOrBlank() -> nombreDoc
+                                        primerNombre.isNotBlank() -> "$primerNombre $apellido".trim()
+                                        else -> "Cliente ServixYa"
+                                    }
+
+                                    val fotoFinal = clientDoc.getString("fotoUrl")
+                                        ?: clientDoc.getString("photoUrl")
+                                        ?: ""
+
+                                    chatsTemp.add(
+                                        ProviderDirectChatUi(
+                                            id = chatId,
+                                            clienteId = clienteId,
+                                            clientName = nombreFinal,
+                                            clientPhoto = fotoFinal,
+                                            lastMessage = ultimoMensaje,
+                                            timeFormatted = horaFormateada,
+                                            fechaUltimoMensaje = fecha
+                                        )
+                                    )
+
+                                    procesados++
+                                    if (procesados == docs.size) {
+                                        listaChatsDirectos = chatsTemp.sortedByDescending { it.fechaUltimoMensaje }
+                                        estaCargandoChats = false
+                                    }
+                                }
+                                .addOnFailureListener {
+                                    procesados++
+                                    if (procesados == docs.size) {
+                                        listaChatsDirectos = chatsTemp.sortedByDescending { it.fechaUltimoMensaje }
+                                        estaCargandoChats = false
+                                    }
+                                }
+                        } else {
+                            procesados++
+                            if (procesados == docs.size) {
+                                listaChatsDirectos = chatsTemp.sortedByDescending { it.fechaUltimoMensaje }
+                                estaCargandoChats = false
+                            }
+                        }
+                    }
+                }
+            }
+    }
+
+    fun actualizarContactoPerfil(
+        telefono: String,
+        correo: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val uid = auth.currentUser?.uid ?: run {
+            onError("Usuario no autenticado.")
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val updates = mapOf(
+                    "telefono" to telefono,
+                    "correo" to correo
+                )
+                db.collection("usuarios").document(uid).set(updates, SetOptions.merge()).await()
+                cargarPerfil()
+                onSuccess()
+            } catch (e: Exception) {
+                onError(e.localizedMessage ?: "Error al actualizar contacto.")
+            }
+        }
+    }
+
     fun cambiarContrasena(
         contrasenaActual: String,
         nuevaContrasena: String,
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
-        val user = FirebaseAuth.getInstance().currentUser
+        val user = auth.currentUser
         val email = user?.email
 
         if (user == null || email.isNullOrEmpty()) {
@@ -651,7 +866,6 @@ class ProviderViewModel : ViewModel() {
             if (reauthTask.isSuccessful) {
                 user.updatePassword(nuevaContrasena).addOnCompleteListener { updateTask ->
                     if (updateTask.isSuccessful) {
-                        val db = FirebaseFirestore.getInstance()
                         db.collection("usuarios").document(user.uid)
                             .update("ultimaActualizacionPassword", Timestamp.now())
                             .addOnSuccessListener { onSuccess() }
@@ -672,8 +886,7 @@ class ProviderViewModel : ViewModel() {
         onSuccess: () -> Unit = {},
         onError: (String) -> Unit = {}
     ) {
-        val user = FirebaseAuth.getInstance().currentUser ?: return
-        val db = FirebaseFirestore.getInstance()
+        val user = auth.currentUser ?: return
 
         val updates = mapOf(
             "notificacionesPushChat" to notificacionesPushChat,
@@ -698,15 +911,16 @@ class ProviderViewModel : ViewModel() {
 
     fun enviarCotizacion(
         solicitudId: String,
-        prestadorId: String,
+        prestadorIdParam: String,
         prestadorNombre: String,
         precio: Double,
         mensaje: String,
         onResult: (Boolean) -> Unit
     ) {
         viewModelScope.launch {
+            val idFinal = prestadorIdParam.ifBlank { prestadorId }
             val propuesta = Propuesta(
-                prestadorId = prestadorId,
+                prestadorId = idFinal,
                 prestadorNombre = prestadorNombre,
                 precioEstimado = precio,
                 mensaje = mensaje
@@ -723,23 +937,23 @@ class ProviderViewModel : ViewModel() {
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
-        val prestadorId = auth.currentUser?.uid
-        if (prestadorId.isNullOrEmpty()) {
+        val currentUid = auth.currentUser?.uid
+        if (currentUid.isNullOrEmpty()) {
             onError("Debes iniciar sesión para postularte")
             return
         }
 
         viewModelScope.launch {
-            db.collection("usuarios").document(prestadorId).get()
+            db.collection("usuarios").document(currentUid).get()
                 .addOnSuccessListener { docPrestador ->
                     val nombrePrestador = docPrestador.getString("nombreCompleto")
                         ?: docPrestador.getString("nombre") ?: "Prestador ServixYa"
                     val fotoPrestador = docPrestador.getString("fotoUrl") ?: ""
-                    val calificacion = docPrestador.getDouble("calificacion") ?: 5.0
+                    val calificacion = docPrestador.getDouble("calificacion") ?: 0.0
                     val totalResenas = docPrestador.getLong("totalResenas")?.toInt() ?: 0
 
                     val datosPropuesta = hashMapOf(
-                        "prestadorId" to prestadorId,
+                        "prestadorId" to currentUid,
                         "prestadorNombre" to nombrePrestador,
                         "prestadorFotoUrl" to fotoPrestador,
                         "calificacion" to calificacion,
@@ -755,7 +969,7 @@ class ProviderViewModel : ViewModel() {
                     val propuestaRef = db.collection("solicitudes")
                         .document(solicitudId)
                         .collection("propuestas")
-                        .document(prestadorId)
+                        .document(currentUid)
 
                     batch.set(propuestaRef, datosPropuesta, SetOptions.merge())
 
@@ -766,7 +980,7 @@ class ProviderViewModel : ViewModel() {
                     val primerMensajeRef = solicitudRef.collection("mensajes").document()
                     val primerMensaje = hashMapOf(
                         "id" to primerMensajeRef.id,
-                        "emisorId" to prestadorId,
+                        "emisorId" to currentUid,
                         "texto" to "Hola, me he postulado a tu solicitud. $mensajePresentacion",
                         "fechaEnvio" to Timestamp.now(),
                         "esOferta" to true,
@@ -776,7 +990,10 @@ class ProviderViewModel : ViewModel() {
                     batch.set(primerMensajeRef, primerMensaje)
 
                     batch.commit()
-                        .addOnSuccessListener { onSuccess() }
+                        .addOnSuccessListener {
+                            escucharMisTrabajos()
+                            onSuccess()
+                        }
                         .addOnFailureListener { e -> onError(e.localizedMessage ?: "Error al enviar la postulación") }
                 }
                 .addOnFailureListener { e ->
@@ -794,7 +1011,7 @@ class ProviderViewModel : ViewModel() {
         db.collection("solicitudes").document(solicitudId).get()
             .addOnSuccessListener { document ->
                 if (document.exists()) {
-                    val solicitud = document.toObject(Solicitud::class.java)
+                    val solicitud = document.toObject(Solicitud::class.java)?.copy(id = document.id)
                     onResult(solicitud)
                 } else {
                     onResult(null)
@@ -802,6 +1019,176 @@ class ProviderViewModel : ViewModel() {
             }
             .addOnFailureListener {
                 onResult(null)
+            }
+    }
+
+    fun escucharMisTrabajos() {
+        val uid = auth.currentUser?.uid ?: return
+        estaCargandoMisTrabajos = true
+
+        val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+
+        misTrabajosGroupListener?.remove()
+        solicitudesListenersMap.values.forEach { it.remove() }
+        solicitudesListenersMap.clear()
+        solicitudesCache.clear()
+
+        misTrabajosGroupListener = db.collectionGroup("propuestas")
+            .whereEqualTo("prestadorId", uid)
+            .addSnapshotListener { propSnapshot, error ->
+                if (error != null) {
+                    estaCargandoMisTrabajos = false
+                    return@addSnapshotListener
+                }
+
+                if (propSnapshot == null || propSnapshot.isEmpty) {
+                    listaMisTrabajosActivos = emptyList()
+                    listaHistorialTrabajos = emptyList()
+                    estaCargandoMisTrabajos = false
+                    return@addSnapshotListener
+                }
+
+                val propuestasMap = mutableMapOf<String, String>()
+                for (pDoc in propSnapshot.documents) {
+                    val solicitudId = pDoc.reference.parent.parent?.id ?: ""
+                    val estadoPropuesta = (pDoc.getString("estado") ?: "PENDIENTE").uppercase()
+                    if (solicitudId.isNotBlank()) {
+                        propuestasMap[solicitudId] = estadoPropuesta
+                    }
+                }
+
+                val actualSolicitudIds = propuestasMap.keys
+
+                val idsToRemove = solicitudesListenersMap.keys.filter { it !in actualSolicitudIds }
+                idsToRemove.forEach { id ->
+                    solicitudesListenersMap[id]?.remove()
+                    solicitudesListenersMap.remove(id)
+                    solicitudesCache.remove(id)
+                }
+
+                fun procesarYRefrescar() {
+                    val activosTemp = mutableListOf<TrabajoItemUI>()
+                    val historialTemp = mutableListOf<TrabajoItemUI>()
+
+                    val estadosActivos = setOf("EN_PROCESO", "ACEPTADA", "ACEPTADO", "EN_CURSO", "EN PROCESO")
+                    val estadosCompletados = setOf("COMPLETADO", "COMPLETADA", "FINALIZADO", "FINALIZADA", "CALIFICADO", "CALIFICADA")
+
+                    for ((solId, estProp) in propuestasMap) {
+                        val sDoc = solicitudesCache[solId] ?: continue
+                        val sol = sDoc.toObject(Solicitud::class.java)?.copy(id = sDoc.id) ?: continue
+
+                        val fechaFormateada = sol.fechaCreacion?.let { sdf.format(it) } ?: "Reciente"
+                        val estadoSolUpper = sol.estado.uppercase()
+
+                        val esPrestadorAsignado = sol.prestadorIdAsignado == uid ||
+                                sDoc.getString("prestadorId") == uid ||
+                                sDoc.getString("proveedorId") == uid
+
+                        val esFinalizado = estadoSolUpper in estadosCompletados ||
+                                estProp in estadosCompletados ||
+                                sDoc.getBoolean("calificado") == true ||
+                                sDoc.getBoolean("prestadorCalifico") == true ||
+                                sDoc.get("calificacionCliente") != null ||
+                                sDoc.get("calificacionPrestador") != null
+
+                        val esTrabajoActivo = !esFinalizado &&
+                                (estadoSolUpper in estadosActivos || estProp in estadosActivos) &&
+                                (esPrestadorAsignado || estProp == "ACEPTADA" || estProp == "ACEPTADO")
+
+                        val fotoDirecta = sDoc.getString("clienteFotoUrl")
+                            ?: sDoc.getString("clienteFoto")
+                            ?: sDoc.getString("fotoUrl")
+                            ?: ""
+
+                        if (esTrabajoActivo) {
+                            activosTemp.add(
+                                TrabajoItemUI(
+                                    id = sol.id,
+                                    clienteId = sol.clienteId,
+                                    clienteNombre = sol.clienteNombre.ifBlank { "Cliente ServixYa" },
+                                    clienteFotoUrl = fotoDirecta,
+                                    titulo = sol.detalleProblema.ifBlank { sol.categoria },
+                                    localidad = sol.localidad,
+                                    direccion = sol.direccion,
+                                    estado = "ACEPTADO",
+                                    fecha = fechaFormateada,
+                                    subtituloEstado = "Trabajo en proceso"
+                                )
+                            )
+                        } else {
+                            val estadoMostrar = when {
+                                esFinalizado -> "COMPLETADO"
+                                estadoSolUpper in setOf("CANCELADO", "CANCELADA") || estProp in setOf("CANCELADO", "CANCELADA") -> "CANCELADO"
+                                estProp == "PENDIENTE" -> "POSTULADO"
+                                estProp in setOf("RECHAZADO", "RECHAZADA") -> "RECHAZADO"
+                                else -> estProp
+                            }
+
+                            val subtitulo = when (estadoMostrar) {
+                                "POSTULADO" -> "En espera de selección"
+                                "COMPLETADO" -> "Trabajo completado"
+                                "RECHAZADO" -> "Propuesta no seleccionada"
+                                "CANCELADO" -> "Solicitud cancelada"
+                                else -> null
+                            }
+
+                            historialTemp.add(
+                                TrabajoItemUI(
+                                    id = sol.id,
+                                    clienteId = sol.clienteId,
+                                    clienteNombre = sol.clienteNombre.ifBlank { "Cliente ServixYa" },
+                                    clienteFotoUrl = fotoDirecta,
+                                    titulo = sol.detalleProblema.ifBlank { sol.categoria },
+                                    localidad = sol.localidad,
+                                    direccion = sol.direccion,
+                                    estado = estadoMostrar,
+                                    fecha = fechaFormateada,
+                                    subtituloEstado = subtitulo
+                                )
+                            )
+                        }
+                    }
+
+                    listaMisTrabajosActivos = activosTemp
+                    listaHistorialTrabajos = historialTemp
+                    estaCargandoMisTrabajos = false
+
+                    val itemsSinFoto = (activosTemp + historialTemp).filter { it.clienteFotoUrl.isBlank() && it.clienteId.isNotBlank() }
+                    for (item in itemsSinFoto) {
+                        db.collection("usuarios").document(item.clienteId).get()
+                            .addOnSuccessListener { uDoc ->
+                                val fotoUser = uDoc.getString("fotoUrl")
+                                    ?: uDoc.getString("photoUrl")
+                                    ?: uDoc.getString("fotoPerfilUrl")
+                                    ?: ""
+                                if (fotoUser.isNotBlank()) {
+                                    listaMisTrabajosActivos = listaMisTrabajosActivos.map {
+                                        if (it.id == item.id) it.copy(clienteFotoUrl = fotoUser) else it
+                                    }
+                                    listaHistorialTrabajos = listaHistorialTrabajos.map {
+                                        if (it.id == item.id) it.copy(clienteFotoUrl = fotoUser) else it
+                                    }
+                                }
+                            }
+                    }
+                }
+
+                for (solicitudId in actualSolicitudIds) {
+                    if (!solicitudesListenersMap.containsKey(solicitudId)) {
+                        val listener = db.collection("solicitudes").document(solicitudId)
+                            .addSnapshotListener { sDoc, sError ->
+                                if (sError != null || sDoc == null || !sDoc.exists()) {
+                                    solicitudesCache.remove(solicitudId)
+                                } else {
+                                    solicitudesCache[solicitudId] = sDoc
+                                }
+                                procesarYRefrescar()
+                            }
+                        solicitudesListenersMap[solicitudId] = listener
+                    }
+                }
+
+                procesarYRefrescar()
             }
     }
 }

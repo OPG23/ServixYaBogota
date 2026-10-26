@@ -24,6 +24,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.google.firebase.auth.FirebaseAuth
+import com.servixyabogota.ui.components.InAppNotificationBanner
+import java.util.Locale
+
+private fun obtenerIniciales(nombre: String): String {
+    if (nombre.isBlank()) return "U"
+    val partes = nombre.trim().split("\\s+".toRegex())
+    return when {
+        partes.size >= 2 -> "${partes[0].take(1)}${partes[1].take(1)}".uppercase()
+        partes.isNotEmpty() && partes[0].isNotEmpty() -> partes[0].take(2).uppercase()
+        else -> "U"
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,16 +44,25 @@ fun ClientHomeScreen(
     viewModel: ClientViewModel = viewModel(),
     onNavigateTab: (String) -> Unit = {},
     onIniciarChat: (ClientProviderModel) -> Unit = {},
-    onVerPerfilPrestador: (ClientProviderModel) -> Unit = {}
+    onVerPerfilPrestador: (ClientProviderModel) -> Unit = {},
+    // 🟢 CALLBACKS PARA NAVEGACIÓN DESDE EL BANNER
+    onVerChatDirecto: (String) -> Unit = {},
+    onVerChatSolicitud: (String) -> Unit = {},
+    onVerPropuestasSolicitud: (String) -> Unit = {}
 ) {
+    // 🟢 RECARGA REACTIVA Y LIMPIEZA DE DATOS AL ENTRAR O CAMBIAR DE USUARIO
+    val currentUid = remember { FirebaseAuth.getInstance().currentUser?.uid }
+    LaunchedEffect(currentUid) {
+        viewModel.cargarPerfilCliente()
+    }
+
     var searchQuery by remember { mutableStateOf("") }
     var categoriaSeleccionada by remember { mutableStateOf("") }
+    var ordenarPorCalificacion by remember { mutableStateOf(false) }
 
-    // Obtenemos los prestadores reales desde el ViewModel
     val listaPrestadores = viewModel.listaPrestadores
     val estaCargando = viewModel.estaCargandoPrestadores
 
-    // CATEGORÍAS CON EMOJIS
     val categoriasList = remember {
         listOf(
             CategoriaItem("Plomería", "🪠"),
@@ -53,9 +75,13 @@ fun ClientHomeScreen(
         )
     }
 
-    // FILTRADO DINÁMICO POR CATEGORÍA Y BÚSQUEDA
-    val prestadoresFiltrados = remember(listaPrestadores, categoriaSeleccionada, searchQuery) {
-        listaPrestadores.filter { prestador ->
+    val prestadoresFiltrados = remember(
+        listaPrestadores,
+        categoriaSeleccionada,
+        searchQuery,
+        ordenarPorCalificacion
+    ) {
+        val filtrados = listaPrestadores.filter { prestador ->
             val coincideCategoria = categoriaSeleccionada.isEmpty() ||
                     prestador.categorias.any { cat -> cat.contains(categoriaSeleccionada, ignoreCase = true) }
             val coincideBusqueda = searchQuery.isEmpty() ||
@@ -63,6 +89,12 @@ fun ClientHomeScreen(
                     prestador.categorias.any { cat -> cat.contains(searchQuery, ignoreCase = true) }
 
             coincideCategoria && coincideBusqueda
+        }
+
+        if (ordenarPorCalificacion) {
+            filtrados.sortedByDescending { it.calificacion }
+        } else {
+            filtrados
         }
     }
 
@@ -75,193 +107,274 @@ fun ClientHomeScreen(
         },
         containerColor = Color(0xFFF8FAFC)
     ) { innerPadding ->
-        LazyColumn(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .statusBarsPadding(),
-            contentPadding = PaddingValues(vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. HEADER (Ubicación + Perfil Cliente)
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+            // CONTENIDO DE LA PANTALLA DE INICIO
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding(),
+                contentPadding = PaddingValues(vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // 1. HEADER (Ubicación + Perfil Cliente)
+                item {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.LocationOn,
-                            contentDescription = "Ubicación",
-                            tint = Color(0xFF1D4ED8),
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Text(
-                            text = viewModel.ciudad.ifBlank { "Bogotá, D.C." },
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
-                        )
-                    }
-
-                    AsyncImage(
-                        model = viewModel.fotoUrl.ifBlank { "https://i.pravatar.cc/150?img=32" },
-                        contentDescription = "Perfil Cliente",
-                        contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .border(1.dp, Color(0xFFE2E8F0), CircleShape)
-                    )
-                }
-            }
-
-            // 2. BUSCADOR
-            item {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = {
-                        Text(
-                            "Buscar por nombre o servicio...",
-                            color = Color(0xFF94A3B8),
-                            fontSize = 14.sp
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Default.Search,
-                            contentDescription = null,
-                            tint = Color(0xFF64748B)
-                        )
-                    },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Default.Clear, contentDescription = "Limpiar", tint = Color(0xFF64748B))
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    shape = RoundedCornerShape(24.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF2563EB),
-                        unfocusedBorderColor = Color(0xFFE2E8F0),
-                        focusedContainerColor = Color.White,
-                        unfocusedContainerColor = Color.White
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                )
-            }
-
-            // 3. BARRA DE CATEGORÍAS CON EMOJIS
-            item {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(categoriasList) { cat ->
-                        val isSelected = cat.nombre.equals(categoriaSeleccionada, ignoreCase = true)
-                        Surface(
-                            onClick = {
-                                categoriaSeleccionada = if (isSelected) "" else cat.nombre
-                            },
-                            shape = RoundedCornerShape(20.dp),
-                            color = if (isSelected) Color(0xFF2563EB) else Color.White,
-                            border = if (isSelected) null else androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                            modifier = Modifier.height(42.dp)
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            Icon(
+                                imageVector = Icons.Default.LocationOn,
+                                contentDescription = "Ubicación",
+                                tint = Color(0xFF1D4ED8),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Text(
+                                text = viewModel.ciudad.ifBlank { "Bogotá, D.C." },
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A)
+                            )
+                        }
+
+                        if (viewModel.fotoUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = viewModel.fotoUrl,
+                                contentDescription = "Perfil Cliente",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .border(1.dp, Color(0xFFE2E8F0), CircleShape)
+                            )
+                        } else {
+                            val iniciales = obtenerIniciales(viewModel.nombre)
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF2563EB)),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Text(text = cat.emoji, fontSize = 16.sp)
                                 Text(
-                                    text = cat.nombre,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (isSelected) Color.White else Color(0xFF1E293B)
+                                    text = iniciales,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp
                                 )
                             }
                         }
                     }
                 }
-            }
 
-            // 4. TÍTULO SECCIÓN Y RESULTADOS
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (categoriaSeleccionada.isBlank()) "Todos los profesionales" else "Especialistas en $categoriaSeleccionada",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0F172A),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "${prestadoresFiltrados.size} disponibles",
-                        fontSize = 12.sp,
-                        color = Color(0xFF64748B)
-                    )
-                }
-            }
-
-            // 5. CARGANDO O LISTADO DE PRESTADORES
-            if (estaCargando) {
+                // 2. BUSCADOR
                 item {
-                    Box(
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = {
+                            Text(
+                                "Buscar por nombre o servicio...",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 14.sp
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = null,
+                                tint = Color(0xFF64748B)
+                            )
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "Limpiar", tint = Color(0xFF64748B))
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(24.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF2563EB),
+                            unfocusedBorderColor = Color(0xFFE2E8F0),
+                            focusedContainerColor = Color.White,
+                            unfocusedContainerColor = Color.White
+                        ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 40.dp),
-                        contentAlignment = Alignment.Center
+                            .padding(horizontal = 20.dp)
+                    )
+                }
+
+                // 3. BARRA DE CATEGORÍAS CON EMOJIS
+                item {
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        CircularProgressIndicator(color = Color(0xFF2563EB))
+                        items(categoriasList) { cat ->
+                            val isSelected = cat.nombre.equals(categoriaSeleccionada, ignoreCase = true)
+                            Surface(
+                                onClick = {
+                                    categoriaSeleccionada = if (isSelected) "" else cat.nombre
+                                },
+                                shape = RoundedCornerShape(20.dp),
+                                color = if (isSelected) Color(0xFF2563EB) else Color.White,
+                                border = if (isSelected) null else androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                modifier = Modifier.height(42.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(text = cat.emoji, fontSize = 16.sp)
+                                    Text(
+                                        text = cat.nombre,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isSelected) Color.White else Color(0xFF1E293B)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
-            } else if (prestadoresFiltrados.isEmpty()) {
+
+                // 4. TÍTULO SECCIÓN Y BARRAS DE FILTRO / RESULTADOS
                 item {
-                    Box(
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 40.dp),
-                        contentAlignment = Alignment.Center
+                            .padding(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "No se encontraron prestadores disponibles.",
-                            color = Color(0xFF64748B),
-                            fontSize = 14.sp
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (categoriaSeleccionada.isBlank()) "Todos los profesionales" else "Especialistas en $categoriaSeleccionada",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${prestadoresFiltrados.size} disponibles",
+                                fontSize = 12.sp,
+                                color = Color(0xFF64748B)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        FilterChip(
+                            selected = ordenarPorCalificacion,
+                            onClick = { ordenarPorCalificacion = !ordenarPorCalificacion },
+                            label = {
+                                Text(
+                                    text = "Mejor valorados",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Star,
+                                    contentDescription = null,
+                                    tint = if (ordenarPorCalificacion) Color(0xFFD97706) else Color(0xFF64748B),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            },
+                            shape = RoundedCornerShape(16.dp),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFFFEF3C7),
+                                selectedLabelColor = Color(0xFF92400E),
+                                containerColor = Color.White,
+                                labelColor = Color(0xFF475569)
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                borderColor = Color(0xFFE2E8F0),
+                                selectedBorderColor = Color(0xFFF59E0B),
+                                enabled = true,
+                                selected = ordenarPorCalificacion
+                            )
                         )
                     }
                 }
-            } else {
-                items(prestadoresFiltrados, key = { it.id }) { prestador ->
-                    Box(modifier = Modifier.padding(horizontal = 20.dp)) {
-                        ProviderCard(
-                            prestador = prestador,
-                            onClickCard = { onVerPerfilPrestador(prestador) },
-                            onIniciarChat = { onIniciarChat(prestador) }
-                        )
+
+                // 5. CARGANDO O LISTADO DE PRESTADORES
+                if (estaCargando) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 40.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = Color(0xFF2563EB))
+                        }
+                    }
+                } else if (prestadoresFiltrados.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 40.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "No se encontraron prestadores disponibles.",
+                                color = Color(0xFF64748B),
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+                } else {
+                    items(prestadoresFiltrados, key = { it.id }) { prestador ->
+                        Box(modifier = Modifier.padding(horizontal = 20.dp)) {
+                            ProviderCard(
+                                prestador = prestador,
+                                onClickCard = { onVerPerfilPrestador(prestador) },
+                                onIniciarChat = { onIniciarChat(prestador) }
+                            )
+                        }
                     }
                 }
             }
+
+            // 🟢 6. BANNER FLOTANTE DE NOTIFICACIONES IN-APP
+            InAppNotificationBanner(
+                notificacion = viewModel.notificacionActiva,
+                onDismiss = {
+                    viewModel.descartarNotificacion()
+                },
+                onClick = { noti ->
+                    viewModel.descartarNotificacion()
+                    if (noti.chatId.isNotBlank()) {
+                        if (noti.esChatDirecto) {
+                            onVerChatDirecto(noti.chatId)
+                        } else {
+                            if (noti.tipo == TipoNotificacion.NUEVO_MENSAJE) {
+                                onVerChatSolicitud(noti.chatId)
+                            } else {
+                                onVerPropuestasSolicitud(noti.chatId)
+                            }
+                        }
+                    }
+                }
+            )
         }
     }
 }
@@ -276,6 +389,12 @@ private fun ProviderCard(
     onClickCard: () -> Unit,
     onIniciarChat: () -> Unit
 ) {
+    val calificacionTexto = if (prestador.totalResenas <= 0 || prestador.calificacion <= 0.0) {
+        "-.-"
+    } else {
+        String.format(Locale.US, "%.1f", prestador.calificacion)
+    }
+
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -292,15 +411,34 @@ private fun ProviderCard(
             ) {
                 // Foto de perfil + Badge Verificado
                 Box(modifier = Modifier.size(64.dp)) {
-                    AsyncImage(
-                        model = prestador.fotoUrl.ifBlank { "https://i.pravatar.cc/150?img=11" },
-                        contentDescription = prestador.nombre,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape)
-                            .background(Color(0xFFE2E8F0))
-                    )
+                    if (prestador.fotoUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = prestador.fotoUrl,
+                            contentDescription = prestador.nombre,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape)
+                                .background(Color(0xFFE2E8F0))
+                        )
+                    } else {
+                        val iniciales = obtenerIniciales(prestador.nombre)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape)
+                                .background(Color(0xFF2563EB)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = iniciales,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 20.sp
+                            )
+                        }
+                    }
+
                     if (prestador.verificado) {
                         Box(
                             modifier = Modifier
@@ -323,7 +461,6 @@ private fun ProviderCard(
 
                 Spacer(modifier = Modifier.width(14.dp))
 
-                // Información
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = prestador.nombre,
@@ -334,7 +471,6 @@ private fun ProviderCard(
 
                     Spacer(modifier = Modifier.height(4.dp))
 
-                    // Calificación y Reseñas
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             imageVector = Icons.Default.Star,
@@ -344,7 +480,7 @@ private fun ProviderCard(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = prestador.calificacion.toString(),
+                            text = calificacionTexto,
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
                             color = Color(0xFF0F172A)
@@ -359,7 +495,6 @@ private fun ProviderCard(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Categorías
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         prestador.categorias.take(2).forEach { cat ->
                             Surface(
@@ -385,7 +520,6 @@ private fun ProviderCard(
             HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Barra Inferior: Estado y Botón de Chat
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,

@@ -223,7 +223,7 @@ private fun TarjetaPropuestaItem(
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
-                            text = "${propuesta.calificacion}",
+                            text = String.format(java.util.Locale.US, "%.1f", propuesta.calificacion),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFFF59E0B)

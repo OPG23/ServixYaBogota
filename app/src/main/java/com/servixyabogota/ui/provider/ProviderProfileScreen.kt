@@ -1,20 +1,29 @@
 package com.servixyabogota.ui.provider
 
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ExitToApp
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Phone
+import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material.icons.outlined.WorkOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,117 +31,112 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.rememberAsyncImagePainter
+import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
+import java.util.Locale
 
 @Composable
 fun PerfilProfesionalScreen(
-    nombre: String = "Carlos Pérez",
+    viewModel: ProviderViewModel = viewModel(),
+    nombre: String = "",
+    fotoUrl: String = "",
+    telefonoInicial: String = "",
+    correoInicial: String = "",
     esVerificado: Boolean = true,
-    rating: String = "4.8",
-    resenasCount: Int = 15,
-    telefonoInicial: String = "+57 310 987 6543",
-    correoInicial: String = "carlos.perez@servix.com",
-    fotoUrl: String? = null,
     onIrAZonaCobertura: () -> Unit = {},
     onIrASeguridad: () -> Unit = {},
     onIrAResenas: () -> Unit = {},
-    onGuardarCambios: (telefono: String, correo: String) -> Unit = { _, _ -> },
+    onGuardarCambios: (String, String) -> Unit = { _, _ -> },
     onLogout: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    var telefono by remember(telefonoInicial) { mutableStateOf(telefonoInicial) }
-    var correo by remember(correoInicial) { mutableStateOf(correoInicial) }
+    val promedio = viewModel.promedioCalificacion
+    val totalResenas = viewModel.totalResenasCount
+
+    val tieneCalificaciones = totalResenas > 0 && promedio > 0.0
+    val promedioTexto = if (tieneCalificaciones) String.format(Locale.US, "%.1f", promedio) else "-.-"
 
     var showLogoutDialog by remember { mutableStateOf(false) }
 
-    val orangeColor = Color(0xFFFF8F00)
+    // 🟢 ESTADOS PARA EDICIÓN DEL TELÉFONO
+    var editandoTelefono by remember { mutableStateOf(false) }
+    var telefonoInput by remember(telefonoInicial) { mutableStateOf(telefonoInicial) }
 
-    // Diálogo de confirmación para cerrar sesión
+    LaunchedEffect(telefonoInicial) {
+        telefonoInput = telefonoInicial
+    }
+
     if (showLogoutDialog) {
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
-            title = { Text(text = "Cerrar Sesión", fontWeight = FontWeight.Bold) },
-            text = { Text(text = "¿Estás seguro de que deseas salir de tu cuenta profesional?") },
+            shape = RoundedCornerShape(16.dp),
+            containerColor = Color.White,
+            title = {
+                Text(
+                    text = "Cerrar sesión 👋",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = Color(0xFF0F172A)
+                )
+            },
+            text = {
+                Text(
+                    text = "¿Estás seguro de que deseas salir de tu cuenta? 🚪",
+                    fontSize = 14.sp,
+                    color = Color(0xFF475569)
+                )
+            },
             confirmButton = {
-                TextButton(
+                Button(
                     onClick = {
                         showLogoutDialog = false
-                        Toast.makeText(context, "Sesión cerrada correctamente", Toast.LENGTH_SHORT).show()
                         onLogout()
-                    }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                    shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text(text = "Sí, cerrar sesión", color = Color(0xFFEF4444), fontWeight = FontWeight.Bold)
+                    Text("Sí, salir 🏃‍♂️", color = Color.White, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showLogoutDialog = false }) {
-                    Text(text = "Cancelar", color = Color(0xFF64748B))
+                    Text("Cancelar", color = Color(0xFF64748B))
                 }
             }
         )
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFFF9FAFB))
-            .statusBarsPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        verticalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column {
-            // ENCABEZADO Y AVATAR
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Perfil Profesional",
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 22.sp,
-                    color = Color(0xFF111827)
-                )
+    Scaffold(
+        containerColor = Color(0xFFF8FAFC)
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .statusBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = "Perfil Profesional",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF0F172A)
+            )
 
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFE5E7EB))
-                ) {
-                    if (!fotoUrl.isNullOrEmpty()) {
-                        Image(
-                            painter = rememberAsyncImagePainter(fotoUrl),
-                            contentDescription = "Foto Perfil",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = null,
-                            tint = Color.Gray,
-                            modifier = Modifier
-                                .size(32.dp)
-                                .align(Alignment.Center)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // TARJETA NOMBRE Y VERIFICACIÓN
-            Card(
+            // TARJETA PRINCIPAL DEL PRESTADOR
+            Surface(
+                color = Color.White,
                 shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
+                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -140,237 +144,350 @@ fun PerfilProfesionalScreen(
                         .fillMaxWidth()
                         .padding(16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.Top
                 ) {
-                    Column {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         Text(
-                            text = nombre.ifBlank { "Carlos Pérez" },
+                            text = nombre.ifBlank { "Prestador ServixYa" },
+                            fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp,
-                            color = Color(0xFF111827)
+                            color = Color(0xFF0F172A)
                         )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.clickable { onIrAResenas() }
+                        ) {
                             Icon(
-                                imageVector = Icons.Default.Star,
+                                imageVector = Icons.Filled.Star,
                                 contentDescription = null,
-                                tint = orangeColor,
-                                modifier = Modifier.size(16.dp)
+                                tint = if (tieneCalificaciones) Color(0xFFFF8F00) else Color(0xFFCBD5E1),
+                                modifier = Modifier.size(18.dp)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = rating,
+                                text = promedioTexto,
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                color = orangeColor
+                                color = if (tieneCalificaciones) Color(0xFFFF8F00) else Color(0xFF64748B)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "($resenasCount reseñas)",
-                                fontSize = 13.sp,
-                                color = Color.Gray
+                                text = if (tieneCalificaciones) {
+                                    "($totalResenas reseña${if (totalResenas != 1) "s" else ""})"
+                                } else {
+                                    "(Sin reseñas)"
+                                },
+                                fontSize = 14.sp,
+                                color = Color(0xFF64748B)
                             )
                         }
-                    }
 
-                    if (esVerificado) {
-                        Surface(
-                            color = Color(0xFFE8F5E9),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        if (esVerificado) {
+                            Surface(
+                                color = Color(0xFFDCFCE7),
+                                shape = RoundedCornerShape(8.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = Color(0xFF2E7D32),
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "VERIFICADO",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF2E7D32)
-                                )
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.CheckCircle,
+                                        contentDescription = null,
+                                        tint = Color(0xFF166534),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "VERIFICADO",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF166534)
+                                    )
+                                }
                             }
                         }
                     }
+
+                    if (fotoUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = fotoUrl,
+                            contentDescription = "Foto de perfil",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(54.dp)
+                                .clip(CircleShape)
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(54.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFCBD5E1)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Person,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // SECCIÓN CONTACTO PROFESIONAL
             Text(
                 text = "CONTACTO PROFESIONAL",
-                fontWeight = FontWeight.ExtraBold,
                 fontSize = 12.sp,
-                color = Color(0xFF1F2937),
-                letterSpacing = 0.5.sp
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Text(
-                text = "Teléfono de contacto profesional",
-                fontSize = 12.sp,
-                color = Color(0xFF4B5563),
-                fontWeight = FontWeight.Medium
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            OutlinedTextField(
-                value = telefono,
-                onValueChange = { telefono = it },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Phone,
-                        contentDescription = null,
-                        tint = Color(0xFF9CA3AF)
-                    )
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color.White,
-                    unfocusedContainerColor = Color.White,
-                    focusedBorderColor = Color(0xFFE5E7EB),
-                    unfocusedBorderColor = Color(0xFFE5E7EB)
-                ),
-                textStyle = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 14.sp,
-                    color = Color(0xFF111827),
-                    fontWeight = FontWeight.Medium
-                )
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF475569),
+                modifier = Modifier.padding(top = 8.dp)
             )
 
-            Spacer(modifier = Modifier.height(14.dp))
+            // 🟢 CAMPO TELÉFONO EDITABLE
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Teléfono de contacto profesional",
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B)
+                    )
+                    if (!editandoTelefono) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.clickable { editandoTelefono = true }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Edit,
+                                contentDescription = "Editar",
+                                tint = Color(0xFFFF8F00),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Editar",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFFF8F00)
+                            )
+                        }
+                    }
+                }
 
-            Text(
-                text = "Correo electrónico profesional",
-                fontSize = 12.sp,
-                color = Color(0xFF4B5563),
-                fontWeight = FontWeight.Medium
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            OutlinedTextField(
-                value = correo,
-                onValueChange = { correo = it },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Email,
-                        contentDescription = null,
-                        tint = Color(0xFF9CA3AF)
-                    )
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color.White,
-                    unfocusedContainerColor = Color.White,
-                    focusedBorderColor = Color(0xFFE5E7EB),
-                    unfocusedBorderColor = Color(0xFFE5E7EB)
-                ),
-                textStyle = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 14.sp,
-                    color = Color(0xFF111827),
-                    fontWeight = FontWeight.Medium
-                )
-            )
+                Surface(
+                    color = Color.White,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (editandoTelefono) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = telefonoInput,
+                                onValueChange = { telefonoInput = it },
+                                label = { Text("Número de teléfono", fontSize = 12.sp) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Phone,
+                                        contentDescription = null,
+                                        tint = Color(0xFF64748B),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = Color(0xFFFF8F00),
+                                    focusedLabelColor = Color(0xFFFF8F00),
+                                    cursorColor = Color(0xFFFF8F00)
+                                )
+                            )
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // MENÚ DE OPCIONES
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column {
-                    PerfilMenuOption(
-                        icon = Icons.Outlined.Lock,
-                        title = "Seguridad y Notificaciones",
-                        onClick = onIrASeguridad
-                    )
-                    HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                    PerfilMenuOption(
-                        icon = Icons.Outlined.StarBorder,
-                        title = "Mis Calificaciones y Reseñas",
-                        onClick = onIrAResenas
-                    )
-                    HorizontalDivider(color = Color(0xFFF3F4F6), thickness = 1.dp)
-                    PerfilMenuOption(
-                        icon = Icons.Outlined.WorkOutline,
-                        title = "Zona de Cobertura y Portafolio",
-                        onClick = onIrAZonaCobertura
-                    )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                TextButton(
+                                    onClick = {
+                                        telefonoInput = telefonoInicial
+                                        editandoTelefono = false
+                                    }
+                                ) {
+                                    Text("Cancelar", color = Color(0xFF64748B), fontSize = 13.sp)
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = {
+                                        if (telefonoInput.isBlank()) {
+                                            Toast.makeText(context, "El teléfono no puede estar vacío", Toast.LENGTH_SHORT).show()
+                                            return@Button
+                                        }
+                                        editandoTelefono = false
+                                        onGuardarCambios(telefonoInput, correoInicial)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF8F00)),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Guardar", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { editandoTelefono = true }
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Phone,
+                                contentDescription = null,
+                                tint = Color(0xFF64748B),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = telefonoInicial.ifBlank { "Sin registrar (Toca para agregar)" },
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (telefonoInicial.isNotBlank()) Color(0xFF0F172A) else Color(0xFF94A3B8)
+                            )
+                        }
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            // CORREO ELECTRÓNICO (SOLO LECTURA)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Correo electrónico profesional",
+                    fontSize = 12.sp,
+                    color = Color(0xFF64748B)
+                )
+                Surface(
+                    color = Color.White,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Email,
+                            contentDescription = null,
+                            tint = Color(0xFF64748B),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = correoInicial.ifBlank { "Sin registrar" },
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF0F172A)
+                        )
+                    }
+                }
+            }
 
-            // OPCIÓN CERRAR SESIÓN
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // MENÚ DE OPCIONES DE CONFIGURACIÓN
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, Color(0xFFFEE2E8)),
+                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                 modifier = Modifier.fillMaxWidth()
             ) {
+                Column {
+                    OpcionPerfilItem(
+                        icon = Icons.Outlined.Lock,
+                        titulo = "Seguridad y Notificaciones",
+                        onClick = onIrASeguridad
+                    )
+                    HorizontalDivider(color = Color(0xFFF1F5F9))
+                    OpcionPerfilItem(
+                        icon = Icons.Outlined.StarOutline,
+                        titulo = "Mis Calificaciones y Reseñas",
+                        onClick = onIrAResenas
+                    )
+                    HorizontalDivider(color = Color(0xFFF1F5F9))
+                    OpcionPerfilItem(
+                        icon = Icons.Outlined.WorkOutline,
+                        titulo = "Zona de Cobertura y Portafolio",
+                        onClick = onIrAZonaCobertura
+                    )
+                    HorizontalDivider(color = Color(0xFFF1F5F9))
+                    OpcionPerfilItem(
+                        icon = Icons.Outlined.HelpOutline,
+                        titulo = "Contactar a Soporte",
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_SENDTO).apply {
+                                data = Uri.parse("mailto:servixyabogota@gmail.com")
+                                putExtra(Intent.EXTRA_SUBJECT, "Soporte Prestador ServixYa - ${nombre.ifBlank { "Prestador" }}")
+                            }
+                            try {
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "No se encontró una aplicación de correo instalada", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                }
+            }
+
+            // BOTÓN CERRAR SESIÓN
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, Color(0xFFFFD6D6)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showLogoutDialog = true }
+            ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showLogoutDialog = true }
-                        .padding(16.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Outlined.ExitToApp,
-                        contentDescription = "Cerrar Sesión",
+                        imageVector = Icons.AutoMirrored.Outlined.Logout,
+                        contentDescription = null,
                         tint = Color(0xFFEF4444),
                         modifier = Modifier.size(22.dp)
                     )
                     Text(
                         text = "Cerrar Sesión",
                         fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFFEF4444),
-                        modifier = Modifier.weight(1f)
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFEF4444)
                     )
                 }
             }
-        }
-
-        Spacer(modifier = Modifier.height(28.dp))
-
-        // BOTÓN DE GUARDAR
-        Button(
-            onClick = {
-                onGuardarCambios(telefono, correo)
-                Toast.makeText(context, "Perfil guardado con éxito", Toast.LENGTH_SHORT).show()
-            },
-            colors = ButtonDefaults.buttonColors(containerColor = orangeColor),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp)
-        ) {
-            Text(
-                text = "Guardar Cambios de Perfil",
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
         }
     }
 }
 
 @Composable
-private fun PerfilMenuOption(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
+private fun OpcionPerfilItem(
+    icon: ImageVector,
+    titulo: String,
     onClick: () -> Unit
 ) {
     Row(
@@ -381,25 +498,27 @@ private fun PerfilMenuOption(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = Color(0xFF374151),
-                modifier = Modifier.size(20.dp)
+                tint = Color(0xFF475569),
+                modifier = Modifier.size(22.dp)
             )
-            Spacer(modifier = Modifier.width(12.dp))
             Text(
-                text = title,
-                fontSize = 14.sp,
+                text = titulo,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF1F2937)
+                color = Color(0xFF0F172A)
             )
         }
         Icon(
             imageVector = Icons.Default.ChevronRight,
             contentDescription = null,
-            tint = Color(0xFF9CA3AF),
+            tint = Color(0xFF94A3B8),
             modifier = Modifier.size(20.dp)
         )
     }

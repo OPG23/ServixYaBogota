@@ -17,8 +17,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import java.util.Date
 import kotlinx.coroutines.tasks.await
+import java.util.Date
 
 data class MensajeChat(
     val id: String = "",
@@ -115,9 +115,11 @@ class ChatViewModel : ViewModel() {
                     val prestadorId = snapshot.getString("prestadorId")
                         ?: snapshot.getString("idPrestador")
                         ?: snapshot.getString("prestadorSeleccionadoId")
+                        ?: snapshot.getString("propuestaPrestadorId")
                         ?: ""
 
-                    val idContraparte = if (esCliente) prestadorId else clienteId
+                    val idContraparteCalculado = if (esCliente) prestadorId else clienteId
+                    val idContraparteFinal = idContraparteCalculado.ifBlank { _uiState.value.idContraparte }
                     val rolContraparte = if (esCliente) "Prestador" else "Cliente"
 
                     _uiState.value = _uiState.value.copy(
@@ -126,13 +128,13 @@ class ChatViewModel : ViewModel() {
                         estadoSolicitud = estadoSolicitud,
                         clienteCalifico = clienteCalifico,
                         prestadorCalifico = prestadorCalifico,
-                        idContraparte = idContraparte,
+                        idContraparte = idContraparteFinal,
                         rolContraparte = rolContraparte,
                         esChatDirecto = false
                     )
 
-                    if (idContraparte.isNotBlank()) {
-                        cargarDatosContraparte(idContraparte)
+                    if (idContraparteFinal.isNotBlank()) {
+                        cargarDatosContraparte(idContraparteFinal)
                     }
                 } else {
                     _uiState.value = _uiState.value.copy(isLoading = false)
@@ -158,7 +160,8 @@ class ChatViewModel : ViewModel() {
                     val clienteCalifico = snapshot.getBoolean("clienteCalifico") ?: false
                     val prestadorCalifico = snapshot.getBoolean("prestadorCalifico") ?: _uiState.value.prestadorCalifico
 
-                    val idContraparte = if (esCliente) prestadorId else clienteId
+                    val idContraparteCalculado = if (esCliente) prestadorId else clienteId
+                    val idContraparteFinal = idContraparteCalculado.ifBlank { _uiState.value.idContraparte }
                     val rolContraparte = if (esCliente) "Prestador" else "Cliente"
 
                     _uiState.value = _uiState.value.copy(
@@ -167,13 +170,13 @@ class ChatViewModel : ViewModel() {
                         estadoSolicitud = estadoSolicitud,
                         clienteCalifico = clienteCalifico,
                         prestadorCalifico = prestadorCalifico,
-                        idContraparte = idContraparte,
+                        idContraparte = idContraparteFinal,
                         rolContraparte = rolContraparte,
                         esChatDirecto = true
                     )
 
-                    if (idContraparte.isNotBlank()) {
-                        cargarDatosContraparte(idContraparte)
+                    if (idContraparteFinal.isNotBlank()) {
+                        cargarDatosContraparte(idContraparteFinal)
                     }
                 } else {
                     _uiState.value = _uiState.value.copy(isLoading = false)
@@ -181,9 +184,6 @@ class ChatViewModel : ViewModel() {
             }
     }
 
-    /**
-     * Escucha en tiempo real la colección 'resenas' para validar si el prestador ya calificó este chat/solicitud
-     */
     private fun escucharEstadoCalificacion(chatId: String, currentUserId: String) {
         resenasListener?.remove()
 
@@ -205,6 +205,8 @@ class ChatViewModel : ViewModel() {
     }
 
     private fun cargarDatosContraparte(userId: String) {
+        if (userId.isBlank()) return
+
         db.collection("usuarios").document(userId).get()
             .addOnSuccessListener { doc ->
                 if (doc.exists()) {
@@ -233,6 +235,7 @@ class ChatViewModel : ViewModel() {
                     val foto = doc.getString("fotoUrl") ?: doc.getString("fotoPerfil") ?: ""
 
                     _uiState.value = _uiState.value.copy(
+                        idContraparte = userId,
                         nombreContraparte = nombreFinal,
                         fotoContraparte = foto
                     )
@@ -261,6 +264,7 @@ class ChatViewModel : ViewModel() {
                         val texto = doc.getString("texto") ?: ""
                         val timestamp = doc.getTimestamp("fechaEnvio")
                         val fecha = timestamp?.toDate() ?: Date()
+
                         val mediaUrl = doc.getString("mediaUrl") ?: doc.getString("imagenUrl")
                         val esVideo = doc.getBoolean("esVideo") ?: false
 
@@ -290,11 +294,25 @@ class ChatViewModel : ViewModel() {
                         )
                     }
 
+                    var contraparteIdFinal = _uiState.value.idContraparte
+                    if (contraparteIdFinal.isBlank()) {
+                        val contraparteDetectada = listaMensajes.firstOrNull {
+                            it.emisorId.isNotBlank() && it.emisorId != currentUserIdActual
+                        }?.emisorId
+
+                        if (!contraparteDetectada.isNullOrBlank()) {
+                            contraparteIdFinal = contraparteDetectada
+                            cargarDatosContraparte(contraparteDetectada)
+                        }
+                    }
+
                     _uiState.value = _uiState.value.copy(
                         mensajes = listaMensajes,
+                        idContraparte = contraparteIdFinal,
                         isLoading = false
                     )
 
+                    // 🟢 SOLO marca como leídos si realmente existen mensajes entrantes del interlocutor sin leer
                     if (mensajesSinLeerList.isNotEmpty()) {
                         marcarMensajesComoLeidos(mensajesSinLeerList)
                     }
@@ -303,7 +321,7 @@ class ChatViewModel : ViewModel() {
     }
 
     private fun marcarMensajesComoLeidos(idsMensajes: List<String>) {
-        if (chatIdActual.isBlank()) return
+        if (chatIdActual.isBlank() || idsMensajes.isEmpty()) return
 
         val coleccionPadre = if (esChatDirecto) "chats" else "solicitudes"
         val batch = db.batch()
@@ -316,9 +334,19 @@ class ChatViewModel : ViewModel() {
             batch.update(refMsg, "leido", true)
         }
 
-        val campoNoLeidos = if (_uiState.value.esCliente) "noLeidosCliente" else "noLeidosPrestador"
+        val esCliente = _uiState.value.esCliente
+        val campoNoLeidos = if (esCliente) "noLeidosCliente" else "noLeidosPrestador"
+        val campoLeido = if (esCliente) "leidoPorCliente" else "leidoPorPrestador"
+
         val refChat = db.collection(coleccionPadre).document(chatIdActual)
-        batch.set(refChat, mapOf(campoNoLeidos to 0), SetOptions.merge())
+        batch.set(
+            refChat,
+            mapOf(
+                campoNoLeidos to 0,
+                campoLeido to true
+            ),
+            SetOptions.merge()
+        )
 
         batch.commit()
     }
@@ -335,7 +363,7 @@ class ChatViewModel : ViewModel() {
         val nuevoMensaje = hashMapOf(
             "emisorId" to currentUserIdActual,
             "texto" to texto.trim(),
-            "fechaEnvio" to Timestamp.now(),
+            "fechaEnvio" to FieldValue.serverTimestamp(),
             "mediaUrl" to (mediaUrl ?: ""),
             "imagenUrl" to (mediaUrl ?: ""),
             "esVideo" to esVideo,
@@ -351,7 +379,10 @@ class ChatViewModel : ViewModel() {
             else -> "📷 Imagen"
         }
 
-        val campoNoLeidosDestinatario = if (_uiState.value.esCliente) "noLeidosPrestador" else "noLeidosCliente"
+        val esCliente = _uiState.value.esCliente
+        val campoNoLeidosDestinatario = if (esCliente) "noLeidosPrestador" else "noLeidosCliente"
+        val campoLeidoDestinatario = if (esCliente) "leidoPorPrestador" else "leidoPorCliente"
+        val campoLeidoEmisor = if (esCliente) "leidoPorCliente" else "leidoPorPrestador"
 
         db.collection(coleccionPadre)
             .document(chatIdActual)
@@ -360,9 +391,11 @@ class ChatViewModel : ViewModel() {
             .addOnSuccessListener {
                 val datosUltimoMensaje = mapOf(
                     "ultimoMensaje" to textoResumen,
-                    "fechaUltimoMensaje" to Timestamp.now(),
+                    "fechaUltimoMensaje" to FieldValue.serverTimestamp(),
                     "ultimoEmisorId" to currentUserIdActual,
-                    campoNoLeidosDestinatario to FieldValue.increment(1)
+                    campoNoLeidosDestinatario to FieldValue.increment(1),
+                    campoLeidoDestinatario to false,
+                    campoLeidoEmisor to true
                 )
 
                 db.collection(coleccionPadre)
@@ -431,7 +464,7 @@ class ChatViewModel : ViewModel() {
             "id" to refMensaje.id,
             "emisorId" to currentUserIdActual,
             "texto" to textoFormateado,
-            "fechaEnvio" to Timestamp.now(),
+            "fechaEnvio" to FieldValue.serverTimestamp(),
             "mediaUrl" to "",
             "imagenUrl" to "",
             "esVideo" to false,
@@ -444,15 +477,20 @@ class ChatViewModel : ViewModel() {
         val batch = db.batch()
         batch.set(refMensaje, mensajeOferta)
 
-        val campoNoLeidosDestinatario = if (_uiState.value.esCliente) "noLeidosPrestador" else "noLeidosCliente"
+        val esCliente = _uiState.value.esCliente
+        val campoNoLeidosDestinatario = if (esCliente) "noLeidosPrestador" else "noLeidosCliente"
+        val campoLeidoDestinatario = if (esCliente) "leidoPorPrestador" else "leidoPorCliente"
+        val campoLeidoEmisor = if (esCliente) "leidoPorCliente" else "leidoPorPrestador"
 
         val datosUltimoMensaje = mutableMapOf<String, Any>(
             "ultimoMensaje" to "Oferta de servicio: $$monto",
-            "fechaUltimoMensaje" to Timestamp.now(),
+            "fechaUltimoMensaje" to FieldValue.serverTimestamp(),
             "ultimoEmisorId" to currentUserIdActual,
             "propuestaMonto" to monto,
             "estadoPropuesta" to "PENDIENTE",
-            campoNoLeidosDestinatario to FieldValue.increment(1)
+            campoNoLeidosDestinatario to FieldValue.increment(1),
+            campoLeidoDestinatario to false,
+            campoLeidoEmisor to true
         )
 
         if (esChatDirecto && yaCalificadoOCompletado) {
@@ -495,9 +533,6 @@ class ChatViewModel : ViewModel() {
         batch.commit()
     }
 
-    /**
-     * Permite al cliente completar el servicio y calificar al prestador.
-     */
     fun completarServicioYCalificar(
         calificacion: Int,
         comentario: String,
@@ -554,10 +589,6 @@ class ChatViewModel : ViewModel() {
             }
     }
 
-    /**
-     * Permite al prestador calificar al cliente una vez el servicio esté completado.
-     * Guarda en la colección raíz 'resenas' de forma estandarizada y recalcula el promedio del cliente.
-     */
     fun calificarCliente(
         calificacion: Int,
         comentario: String,
@@ -620,7 +651,7 @@ class ChatViewModel : ViewModel() {
                                     "tipo" to "PRESTADOR_A_CLIENTE",
                                     "calificacion" to calificacion,
                                     "comentario" to comentario.trim(),
-                                    "fecha" to Timestamp.now()
+                                    "fecha" to FieldValue.serverTimestamp()
                                 )
                                 batch.set(refResena, nuevaResena)
 

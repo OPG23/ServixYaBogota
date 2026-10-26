@@ -79,4 +79,10 @@ dependencies {
     // En build.gradle.kts (Module :app)
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("io.coil-kt:coil-video:2.6.0") // <-- Permite extraer la miniatura del video
+
+    // Dependencias para pruebas UI de Compose
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test:runner:1.5.2")
 }

@@ -38,6 +38,11 @@ fun ClientProposalsScreen(
     val misSolicitudesState = remember(currentUserId) { clientViewModel.getMisSolicitudes(currentUserId) }
     val listaSolicitudes by misSolicitudesState.collectAsState()
 
+    // Limpia el badge de propuestas al abrir la pantalla
+    LaunchedEffect(Unit) {
+        clientViewModel.limpiarBadgePropuestas()
+    }
+
     // 1. Filtro para incluir únicamente solicitudes en estado activo/pendiente/en proceso
     val solicitudesActivas = remember(listaSolicitudes) {
         val estadosActivos = setOf("PENDIENTE", "PUBLICADA", "EN_PROCESO")
@@ -147,7 +152,7 @@ fun ClientProposalsScreen(
                 }
             }
 
-            // BARRA HORIZONTAL DE FILTRO DE CATEGORÍAS (Reutilizada de ClientDirectChatsScreen)
+            // BARRA HORIZONTAL DE FILTRO DE CATEGORÍAS
             CategoryFilterChips(
                 selectedCategory = selectedCategory,
                 onCategorySelected = { selectedCategory = it }

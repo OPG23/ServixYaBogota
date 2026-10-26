@@ -69,20 +69,32 @@ fun OportunidadesScreen(
         uiState.categorias.map { it.replace(Regex("[^a-zA-ZáéíóúÁÉÍÓÚñÑ\\s]"), "").trim() }
     }
 
-    val solicitudesFlow = remember(categoriasPrestador, uiState.localidades) {
+    // Traemos TODAS las solicitudes asociadas a sus categorías (sin limitar por localidad en la consulta base)
+    val solicitudesFlow = remember(categoriasPrestador) {
         viewModel.getSolicitudesDisponibles(
             misCategorias = categoriasPrestador,
-            misLocalidades = uiState.localidades
+            misLocalidades = emptyList()
         )
     }
 
     val solicitudesDisponibles by solicitudesFlow.collectAsState(initial = emptyList())
 
-    val publicacionesFiltradas = remember(filtroSeleccionado, solicitudesDisponibles) {
+    // Listas filtradas según las reglas solicitadas
+    val solicitudesEnMisLocalidades = remember(solicitudesDisponibles, uiState.localidades) {
+        solicitudesDisponibles.filter { uiState.localidades.contains(it.localidad) }
+    }
+
+    val solicitudesUrgentes = remember(solicitudesDisponibles, uiState.localidades) {
+        solicitudesDisponibles.filter {
+            it.nivelUrgencia.equals("Urgente", ignoreCase = true) && uiState.localidades.contains(it.localidad)
+        }
+    }
+
+    val publicacionesFiltradas = remember(filtroSeleccionado, solicitudesDisponibles, solicitudesEnMisLocalidades, solicitudesUrgentes) {
         when (filtroSeleccionado) {
-            "En mi localidad" -> solicitudesDisponibles.filter { uiState.localidades.contains(it.localidad) }
-            "Urgentes 🚨" -> solicitudesDisponibles.filter { it.nivelUrgencia.equals("Urgente", ignoreCase = true) }
-            else -> solicitudesDisponibles
+            "En mis localidades" -> solicitudesEnMisLocalidades
+            "Urgentes 🚨" -> solicitudesUrgentes
+            else -> solicitudesDisponibles // "Todas": todos sus servicios independientemente de la localidad
         }
     }
 
@@ -169,14 +181,14 @@ fun OportunidadesScreen(
             }
             item {
                 FilterChip(
-                    text = "En mi localidad",
-                    isSelected = filtroSeleccionado == "En mi localidad",
-                    onClick = { filtroSeleccionado = "En mi localidad" }
+                    text = "En mis localidades (${solicitudesEnMisLocalidades.size})",
+                    isSelected = filtroSeleccionado == "En mis localidades",
+                    onClick = { filtroSeleccionado = "En mis localidades" }
                 )
             }
             item {
                 FilterChip(
-                    text = "Urgentes 🚨",
+                    text = "Urgentes 🚨 (${solicitudesUrgentes.size})",
                     isSelected = filtroSeleccionado == "Urgentes 🚨",
                     onClick = { filtroSeleccionado = "Urgentes 🚨" }
                 )
@@ -444,14 +456,20 @@ fun ProviderNonApprovedScreen(
     }
 }
 
+
 @Composable
-fun HistorialTrabajosScreen() {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Text("No tienes trabajos completados aún", color = Color.Gray, fontSize = 14.sp)
-    }
+fun HistorialTrabajosScreen(
+    viewModel: ProviderViewModel,
+    onVerDetalleSolicitud: (String) -> Unit = {},
+    onOpenChat: (solicitudId: String, clienteId: String) -> Unit = { _, _ -> }
+) {
+    ProviderHistoryScreen(
+        trabajosActivos = viewModel.listaMisTrabajosActivos,
+        historialReciente = viewModel.listaHistorialTrabajos,
+        estaCargando = viewModel.estaCargandoMisTrabajos,
+        onVerDetalleSolicitud = onVerDetalleSolicitud,
+        onAbrirChatCliente = onOpenChat
+    )
 }
 
 @Composable

@@ -1,5 +1,6 @@
 package com.servixyabogota.ui.client
 
+import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -17,7 +18,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.ExitToApp
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -45,12 +45,11 @@ fun ClientProfileScreen(
 ) {
     val context = LocalContext.current
 
-    var nombre by remember(viewModel.nombre) { mutableStateOf(viewModel.nombre) }
+    val nombre by remember(viewModel.nombre) { mutableStateOf(viewModel.nombre) }
     var telefono by remember(viewModel.telefono) { mutableStateOf(viewModel.telefono) }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var showLogoutDialog by remember { mutableStateOf(false) }
 
-    // Launcher para seleccionar la foto desde la galería
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -93,10 +92,6 @@ fun ClientProfileScreen(
                 Box(modifier = Modifier.padding(16.dp)) {
                     Button(
                         onClick = {
-                            if (nombre.isBlank()) {
-                                Toast.makeText(context, "El nombre no puede estar vacío", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
                             viewModel.guardarCambiosPerfil(
                                 nuevoNombre = nombre,
                                 nuevoTelefono = telefono,
@@ -204,7 +199,6 @@ fun ClientProfileScreen(
                             fontSize = 32.sp
                         )
 
-                        // Botón de cámara
                         Box(
                             modifier = Modifier
                                 .size(30.dp)
@@ -274,24 +268,24 @@ fun ClientProfileScreen(
                         )
                         OutlinedTextField(
                             value = nombre,
-                            onValueChange = { nombre = it },
+                            onValueChange = {},
+                            readOnly = true,
+                            enabled = false,
                             leadingIcon = {
                                 Icon(
                                     imageVector = Icons.Outlined.Person,
                                     contentDescription = null,
-                                    tint = Color(0xFF64748B),
+                                    tint = Color(0xFF94A3B8),
                                     modifier = Modifier.size(20.dp)
                                 )
                             },
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF2563EB),
-                                unfocusedBorderColor = Color(0xFFE2E8F0),
-                                focusedContainerColor = Color.White,
-                                unfocusedContainerColor = Color.White,
-                                focusedTextColor = Color(0xFF0F172A),
-                                unfocusedTextColor = Color(0xFF0F172A)
+                                disabledBorderColor = Color(0xFFE2E8F0),
+                                disabledContainerColor = Color(0xFFF1F5F9),
+                                disabledTextColor = Color(0xFF64748B),
+                                disabledLeadingIconColor = Color(0xFF94A3B8)
                             ),
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -359,29 +353,10 @@ fun ClientProfileScreen(
                             ),
                             modifier = Modifier.fillMaxWidth()
                         )
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.padding(top = 2.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.CheckCircle,
-                                contentDescription = null,
-                                tint = Color(0xFF10B981),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = "Correo verificado",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color(0xFF10B981)
-                            )
-                        }
                     }
                 }
 
-                // OPCIONES DE CONFIGURACIÓN
+                // OPCIONES DE CONFIGURACIÓN Y SOPORTE
                 Surface(
                     color = Color.White,
                     shape = RoundedCornerShape(16.dp),
@@ -435,6 +410,47 @@ fun ClientProfileScreen(
                             )
                             Text(
                                 text = "Mis Calificaciones y Reseñas",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF0F172A),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = Color(0xFF94A3B8)
+                            )
+                        }
+
+                        HorizontalDivider(color = Color(0xFFF1F5F9))
+
+                        // 🟢 BOTÓN DE CONTACTAR A SOPORTE
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    val intent = Intent(Intent.ACTION_SENDTO).apply {
+                                        data = Uri.parse("mailto:servixyabogota@gmail.com")
+                                        putExtra(Intent.EXTRA_SUBJECT, "Soporte Cliente ServixYa - $nombre")
+                                    }
+                                    try {
+                                        context.startActivity(intent)
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "No se encontró una aplicación de correo instalada", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.HelpOutline,
+                                contentDescription = null,
+                                tint = Color(0xFF1D4ED8),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Text(
+                                text = "Contactar a Soporte",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = Color(0xFF0F172A),

@@ -152,7 +152,6 @@ fun ChatDetailScreen(
     val hayOfertaPendiente = uiState.estadoPropuesta == "PENDIENTE" || ultimaOferta?.estadoOferta == "PENDIENTE"
     val yaCalificadoOCompletado = uiState.clienteCalifico || servicioCompletado
 
-    // Regla para mostrar botón de nueva oferta al prestador
     val mostrarBotonOferta = if (!esCliente) {
         if (esChatDirecto && yaCalificadoOCompletado) {
             !hayOfertaPendiente
@@ -341,7 +340,6 @@ fun ChatDetailScreen(
 
                 HorizontalDivider(color = Color(0xFFF1F5F9))
 
-                // BANNER DE ESTADO Y ACCIONES DE CALIFICACIÓN
                 if (cotizacionAceptada) {
                     Surface(
                         color = Color(0xFFDCFCE7),

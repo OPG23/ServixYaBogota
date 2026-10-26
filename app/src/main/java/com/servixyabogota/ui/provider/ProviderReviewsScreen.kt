@@ -18,10 +18,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 import java.util.Locale
 
 @Composable
@@ -37,8 +39,10 @@ fun ProviderReviewsScreen(
     val totalResenas = viewModel.totalResenasCount
     val estaCargando = viewModel.estaCargandoResenas
 
+    val tieneCalificaciones = totalResenas > 0 && promedio > 0.0
+    val promedioTexto = if (tieneCalificaciones) String.format(Locale.US, "%.1f", promedio) else "-.-"
+
     val currentReviews = if (selectedTab == 0) recibidasReviews else otorgadasReviews
-    val promedioTexto = String.format(Locale.US, "%.1f", promedio)
 
     Scaffold(
         containerColor = Color(0xFFF8FAFC)
@@ -52,7 +56,6 @@ fun ProviderReviewsScreen(
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // 1. ENCABEZADO
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -82,7 +85,6 @@ fun ProviderReviewsScreen(
                 )
             }
 
-            // 2. RESUMEN DE REPUTACIÓN COMO PRESTADOR
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(16.dp),
@@ -103,14 +105,14 @@ fun ProviderReviewsScreen(
                         Icon(
                             imageVector = Icons.Filled.Star,
                             contentDescription = null,
-                            tint = Color(0xFFFF8F00),
+                            tint = if (tieneCalificaciones) Color(0xFFFF8F00) else Color(0xFFCBD5E1),
                             modifier = Modifier.size(28.dp)
                         )
                         Text(
                             text = promedioTexto,
                             fontSize = 26.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color(0xFFFF8F00)
+                            color = if (tieneCalificaciones) Color(0xFFFF8F00) else Color(0xFF64748B)
                         )
                         Text(
                             text = "como Prestador",
@@ -121,14 +123,17 @@ fun ProviderReviewsScreen(
                     }
 
                     Text(
-                        text = "Basado en $totalResenas evaluación${if (totalResenas != 1) "es" else ""}",
+                        text = if (tieneCalificaciones) {
+                            "Basado en $totalResenas evaluación${if (totalResenas != 1) "es" else ""}"
+                        } else {
+                            "Sin evaluaciones aún"
+                        },
                         fontSize = 14.sp,
                         color = Color(0xFF64748B)
                     )
                 }
             }
 
-            // 3. SEGMENTED TABS
             Surface(
                 color = Color(0xFFF1F5F9),
                 shape = RoundedCornerShape(24.dp),
@@ -140,7 +145,6 @@ fun ProviderReviewsScreen(
                         .padding(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    // Pestaña Recibidas de Clientes
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -158,7 +162,6 @@ fun ProviderReviewsScreen(
                         )
                     }
 
-                    // Pestaña Otorgadas a Clientes
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -178,7 +181,6 @@ fun ProviderReviewsScreen(
                 }
             }
 
-            // 4. LISTA DE RESEÑAS / ESTADOS
             if (estaCargando && currentReviews.isEmpty()) {
                 Box(
                     modifier = Modifier
@@ -230,19 +232,31 @@ private fun ReviewCard(review: ReviewItem) {
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFCBD5E1)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Person,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
+                if (review.fotoUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = review.fotoUrl,
+                        contentDescription = review.nombre,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFE2E8F0))
                     )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFCBD5E1)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Person,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
