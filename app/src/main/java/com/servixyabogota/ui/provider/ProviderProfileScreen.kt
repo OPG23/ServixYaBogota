@@ -10,12 +10,14 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Lock
@@ -33,6 +35,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -61,6 +64,14 @@ fun PerfilProfesionalScreen(
     val promedioTexto = if (tieneCalificaciones) String.format(Locale.US, "%.1f", promedio) else "-.-"
 
     var showLogoutDialog by remember { mutableStateOf(false) }
+
+    // 🟢 ESTADOS PARA EDICIÓN DEL TELÉFONO
+    var editandoTelefono by remember { mutableStateOf(false) }
+    var telefonoInput by remember(telefonoInicial) { mutableStateOf(telefonoInicial) }
+
+    LaunchedEffect(telefonoInicial) {
+        telefonoInput = telefonoInicial
+    }
 
     if (showLogoutDialog) {
         AlertDialog(
@@ -121,6 +132,7 @@ fun PerfilProfesionalScreen(
                 color = Color(0xFF0F172A)
             )
 
+            // TARJETA PRINCIPAL DEL PRESTADOR
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(16.dp),
@@ -236,39 +248,131 @@ fun PerfilProfesionalScreen(
                 modifier = Modifier.padding(top = 8.dp)
             )
 
+            // 🟢 CAMPO TELÉFONO EDITABLE
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "Teléfono de contacto profesional",
-                    fontSize = 12.sp,
-                    color = Color(0xFF64748B)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Teléfono de contacto profesional",
+                        fontSize = 12.sp,
+                        color = Color(0xFF64748B)
+                    )
+                    if (!editandoTelefono) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.clickable { editandoTelefono = true }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Edit,
+                                contentDescription = "Editar",
+                                tint = Color(0xFFFF8F00),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Editar",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFFF8F00)
+                            )
+                        }
+                    }
+                }
+
                 Surface(
                     color = Color.White,
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Phone,
-                            contentDescription = null,
-                            tint = Color(0xFF64748B),
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = telefonoInicial.ifBlank { "Sin registrar" },
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xFF0F172A)
-                        )
+                    if (editandoTelefono) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = telefonoInput,
+                                onValueChange = { telefonoInput = it },
+                                label = { Text("Número de teléfono", fontSize = 12.sp) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Phone,
+                                        contentDescription = null,
+                                        tint = Color(0xFF64748B),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = Color(0xFFFF8F00),
+                                    focusedLabelColor = Color(0xFFFF8F00),
+                                    cursorColor = Color(0xFFFF8F00)
+                                )
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                TextButton(
+                                    onClick = {
+                                        telefonoInput = telefonoInicial
+                                        editandoTelefono = false
+                                    }
+                                ) {
+                                    Text("Cancelar", color = Color(0xFF64748B), fontSize = 13.sp)
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = {
+                                        if (telefonoInput.isBlank()) {
+                                            Toast.makeText(context, "El teléfono no puede estar vacío", Toast.LENGTH_SHORT).show()
+                                            return@Button
+                                        }
+                                        editandoTelefono = false
+                                        onGuardarCambios(telefonoInput, correoInicial)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF8F00)),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Guardar", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { editandoTelefono = true }
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Phone,
+                                contentDescription = null,
+                                tint = Color(0xFF64748B),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = telefonoInicial.ifBlank { "Sin registrar (Toca para agregar)" },
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (telefonoInicial.isNotBlank()) Color(0xFF0F172A) else Color(0xFF94A3B8)
+                            )
+                        }
                     }
                 }
             }
 
+            // CORREO ELECTRÓNICO (SOLO LECTURA)
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     text = "Correo electrónico profesional",
@@ -304,6 +408,7 @@ fun PerfilProfesionalScreen(
 
             Spacer(modifier = Modifier.height(4.dp))
 
+            // MENÚ DE OPCIONES DE CONFIGURACIÓN
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(16.dp),
@@ -347,6 +452,7 @@ fun PerfilProfesionalScreen(
                 }
             }
 
+            // BOTÓN CERRAR SESIÓN
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(16.dp),
