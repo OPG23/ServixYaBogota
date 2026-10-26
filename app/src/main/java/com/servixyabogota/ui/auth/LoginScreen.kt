@@ -1,6 +1,7 @@
 package com.servixyabogota.ui.auth
 
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -8,8 +9,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -19,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -119,7 +125,7 @@ fun LoginScreen(
         Spacer(modifier = Modifier.height(4.dp))
         Text(text = "Accede a tu cuenta para continuar", fontSize = 14.sp, color = Color.Gray)
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(28.dp))
 
         // Campo Correo
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -177,7 +183,7 @@ fun LoginScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
         // BOTÓN ¿OLVIDÉ MI CONTRASEÑA?
         TextButton(
@@ -190,7 +196,17 @@ fun LoginScreen(
             Text("¿Olvidé mi contraseña?", color = Color(0xFF1976D2), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 🧪 ACCESO RÁPIDO PARA JURADO DE EVALUACIÓN
+        AccesoRapidoJuradoCard(
+            onSeleccionarCuenta = { correoPrueba, contrasenaPrueba ->
+                email = correoPrueba
+                password = contrasenaPrueba
+            }
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
 
         if (isLoading) {
             CircularProgressIndicator(color = Color(0xFF1976D2))
@@ -311,5 +327,157 @@ fun LoginScreen(
                 }
             }
         )
+    }
+}
+
+// 🟢 COMPONENTES DE ACCESO RÁPIDO PARA EL JURADO
+@Composable
+private fun AccesoRapidoJuradoCard(
+    onSeleccionarCuenta: (correo: String, contrasena: String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = Color(0xFFF8FAFC),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "🧪",
+                    fontSize = 15.sp
+                )
+                Text(
+                    text = "ACCESO RÁPIDO PARA JURADO",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFF475569),
+                    letterSpacing = 0.5.sp
+                )
+            }
+
+            Text(
+                text = "Toca un rol para autorrellenar las credenciales:",
+                fontSize = 12.sp,
+                color = Color(0xFF64748B)
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 1. ADMINISTRADOR
+                BotonRolPrueba(
+                    titulo = "Administrador",
+                    subtitulo = "admin@servixyabogota.com",
+                    icon = Icons.Default.AdminPanelSettings,
+                    badgeColor = Color(0xFF1E293B),
+                    onClick = {
+                        onSeleccionarCuenta("admin@servixyabogota.com", "Admin123*")
+                    }
+                )
+
+                // 2. CLIENTE RESIDENCIAL
+                BotonRolPrueba(
+                    titulo = "Cliente Residencial",
+                    subtitulo = "cliente.prueba@gmail.com",
+                    icon = Icons.Default.Person,
+                    badgeColor = Color(0xFF0284C7),
+                    onClick = {
+                        onSeleccionarCuenta("cliente.prueba@gmail.com", "Cliente123*")
+                    }
+                )
+
+                // 3. PRESTADOR VERIFICADO
+                BotonRolPrueba(
+                    titulo = "Prestador Verificado",
+                    subtitulo = "prestador.verificado@gmail.com",
+                    icon = Icons.Default.Verified,
+                    badgeColor = Color(0xFF16A34A),
+                    onClick = {
+                        onSeleccionarCuenta("prestador.verificado@gmail.com", "Tecnico123*")
+                    }
+                )
+
+                // 4. PRESTADOR PENDIENTE
+                BotonRolPrueba(
+                    titulo = "Prestador Pendiente",
+                    subtitulo = "prestador.pendiente@gmail.com",
+                    icon = Icons.Default.HourglassTop,
+                    badgeColor = Color(0xFFD97706),
+                    onClick = {
+                        onSeleccionarCuenta("prestador.pendiente@gmail.com", "Tecnico123*")
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BotonRolPrueba(
+    titulo: String,
+    subtitulo: String,
+    icon: ImageVector,
+    badgeColor: Color,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        color = Color.White,
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Surface(
+                color = badgeColor.copy(alpha = 0.1f),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = badgeColor,
+                    modifier = Modifier
+                        .padding(6.dp)
+                        .size(18.dp)
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = titulo,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF0F172A)
+                )
+                Text(
+                    text = subtitulo,
+                    fontSize = 11.sp,
+                    color = Color(0xFF64748B)
+                )
+            }
+
+            Surface(
+                color = Color(0xFFF1F5F9),
+                shape = RoundedCornerShape(6.dp)
+            ) {
+                Text(
+                    text = "Usar",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF334155),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                )
+            }
+        }
     }
 }
